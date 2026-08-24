@@ -6,7 +6,14 @@ use keystone_lang::{Direction, Expr, Statement};
 #[derive(Clone, PartialEq, Debug)]
 enum DraggedBlock {
     New(Statement),
-    Move { path_id: String, index: usize },
+    Move { path: Vec<usize> },
+}
+
+#[derive(Clone, Debug)]
+struct MoveRequest {
+    src_path: Vec<usize>,
+    target_path: Vec<usize>,
+    insert_idx: usize,
 }
 
 pub trait ToCode {
@@ -102,6 +109,84 @@ impl Plugin for VisualProgrammingPlugin {
     }
 }
 
+fn remove_statement_at_path(blocks: &mut Vec<Statement>, path: &[usize]) -> Option<Statement> {
+    if path.is_empty() {
+        return None;
+    }
+    if path.len() == 1 {
+        if path[0] < blocks.len() {
+            return Some(blocks.remove(path[0]));
+        }
+        return None;
+    }
+
+    let head = path[0];
+    if head >= blocks.len() {
+        return None;
+    }
+
+    let body = match &mut blocks[head] {
+        Statement::If(_, body) => body,
+        Statement::Loop(_, body) => body,
+        Statement::While(_, body) => body,
+        _ => return None,
+    };
+
+    remove_statement_at_path(body, &path[1..])
+}
+
+fn insert_statement_at_path(
+    blocks: &mut Vec<Statement>,
+    target_path: &[usize],
+    insert_idx: usize,
+    stmt: Statement,
+) {
+    if target_path.is_empty() {
+        let idx = insert_idx.min(blocks.len());
+        blocks.insert(idx, stmt);
+        return;
+    }
+
+    let head = target_path[0];
+    if head >= blocks.len() {
+        return;
+    }
+
+    let body = match &mut blocks[head] {
+        Statement::If(_, body) => body,
+        Statement::Loop(_, body) => body,
+        Statement::While(_, body) => body,
+        _ => return,
+    };
+
+    insert_statement_at_path(body, &target_path[1..], insert_idx, stmt);
+}
+
+fn is_ancestor(ancestor_path: &[usize], target_path: &[usize]) -> bool {
+    if ancestor_path.len() >= target_path.len() {
+        return false;
+    }
+    target_path.starts_with(ancestor_path)
+}
+
+fn adjust_path_after_removal(target_path: &[usize], removed_path: &[usize]) -> Vec<usize> {
+    let mut adjusted = target_path.to_vec();
+
+    let common_len = target_path
+        .iter()
+        .zip(removed_path.iter())
+        .take_while(|(a, b)| a == b)
+        .count();
+
+    if common_len < removed_path.len() && common_len < target_path.len() {
+        if removed_path[common_len] < target_path[common_len] {
+            adjusted[common_len] -= 1;
+        }
+    }
+
+    adjusted
+}
+
 fn vpl_ui_system(mut contexts: EguiContexts, mut state: ResMut<VplState>) -> Result<(), BevyError> {
     let ctx = contexts.ctx_mut()?;
 
@@ -179,7 +264,34 @@ fn vpl_ui_system(mut contexts: EguiContexts, mut state: ResMut<VplState>) -> Res
                     if state.blocks.is_empty() {
                         ui.label("(Drag blocks here)");
                     }
-                    render_block_list(ui, &mut state.blocks, "root");
+
+                    let mut move_request = None;
+
+                    render_block_list(ui, &mut state.blocks, Vec::new(), &mut move_request);
+
+                    if let Some(req) = move_request {
+                        if let Some(moved_block) =
+                            remove_statement_at_path(&mut state.blocks, &req.src_path)
+                        {
+                            let adjusted_target_path =
+                                adjust_path_after_removal(&req.target_path, &req.src_path);
+
+                            let mut adjusted_idx = req.insert_idx;
+                            if req.src_path.len() == req.target_path.len() + 1
+                                && req.src_path.starts_with(&req.target_path)
+                                && req.src_path.last().copied() < Some(req.insert_idx)
+                            {
+                                adjusted_idx = adjusted_idx.saturating_sub(1);
+                            }
+
+                            insert_statement_at_path(
+                                &mut state.blocks,
+                                &adjusted_target_path,
+                                adjusted_idx,
+                                moved_block,
+                            );
+                        }
+                    }
                 });
             });
 
@@ -209,11 +321,23 @@ fn render_palette_button(
     }
 }
 
-fn render_block_list(ui: &mut egui::Ui, blocks: &mut Vec<Statement>, path_id: &str) {
+fn render_block_list(
+    ui: &mut egui::Ui,
+    current_blocks: &mut Vec<Statement>,
+    current_path: Vec<usize>,
+    move_request: &mut Option<MoveRequest>,
+) {
     let mut delete_target_idx = None;
 
-    for idx in 0..blocks.len() {
-        let current_id_str = format!("{}_{}", path_id, idx);
+    for idx in 0..current_blocks.len() {
+        let mut this_path = current_path.clone();
+        this_path.push(idx);
+
+        let current_id_str = this_path
+            .iter()
+            .map(|i| i.to_string())
+            .collect::<Vec<_>>()
+            .join("_");
         let block_id = egui::Id::new(&current_id_str);
 
         let (_, dropped_payload) =
@@ -222,20 +346,19 @@ fn render_block_list(ui: &mut egui::Ui, blocks: &mut Vec<Statement>, path_id: &s
                     ui.dnd_drag_source(
                         block_id.with("drag_handle"),
                         DraggedBlock::Move {
-                            path_id: path_id.to_string(),
-                            index: idx,
+                            path: this_path.clone(),
                         },
                         |ui| {
                             ui.horizontal(|ui| {
                                 ui.label("☰").on_hover_cursor(egui::CursorIcon::Grab);
-                                let label_text = match &blocks[idx] {
+                                let label_text = match &current_blocks[idx] {
                                     Statement::Move(_) => "🏃 Move",
                                     Statement::Turn(_) => "🔄 Turn",
                                     Statement::Print(_) => "💬 Print",
                                     Statement::Sleep(_) => "💤 Sleep",
-                                    Statement::If(_, _) => "❓ [If]",
-                                    Statement::Loop(_, _) => "🔁 [Loop]",
-                                    Statement::While(_, _) => "🔄 [While]",
+                                    Statement::If(_, _) => "❓ If",
+                                    Statement::Loop(_, _) => "🔁 Loop",
+                                    Statement::While(_, _) => "🔄 While",
                                     _ => "📄 Statement",
                                 };
                                 ui.label(egui::RichText::new(label_text).strong());
@@ -245,7 +368,7 @@ fn render_block_list(ui: &mut egui::Ui, blocks: &mut Vec<Statement>, path_id: &s
 
                     ui.separator();
 
-                    match &mut blocks[idx] {
+                    match &mut current_blocks[idx] {
                         Statement::Move(expr) => {
                             if let Expr::Direction(dir) = expr {
                                 render_direction_combobox(
@@ -275,72 +398,62 @@ fn render_block_list(ui: &mut egui::Ui, blocks: &mut Vec<Statement>, path_id: &s
                                 ui.label("sec");
                             }
                         }
-                        Statement::If(_cond, body) => {
-                            ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
-                                egui::CollapsingHeader::new("if is_touched()")
-                                    .id_salt(&current_id_str)
-                                    .default_open(true)
-                                    .show(ui, |ui| {
-                                        render_block_list(ui, body, &current_id_str);
-                                    });
-                            });
-                        }
-                        Statement::Loop(expr, body) => {
-                            ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
-                                egui::CollapsingHeader::new("loop")
-                                    .id_salt(&current_id_str)
-                                    .default_open(true)
-                                    .show(ui, |ui| {
-                                        if let Expr::Uint(v) = expr {
-                                            ui.horizontal(|ui| {
-                                                ui.label("Repeat count:");
-                                                ui.add(egui::DragValue::new(v).range(1..=10));
-                                            });
-                                        }
-                                        render_block_list(ui, body, &current_id_str);
-                                    });
-                            });
-                        }
-                        Statement::While(_cond, body) => {
-                            ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
-                                egui::CollapsingHeader::new("while true")
-                                    .id_salt(&current_id_str)
-                                    .default_open(true)
-                                    .show(ui, |ui| {
-                                        render_block_list(ui, body, &current_id_str);
-                                    });
-                            });
-                        }
                         _ => {}
                     }
 
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button("❌").clicked() {
-                            delete_target_idx = Some(idx);
-                        }
-                    });
+                    if ui.small_button("❌").clicked() {
+                        delete_target_idx = Some(idx);
+                    }
                 });
+
+                match &mut current_blocks[idx] {
+                    Statement::If(_cond, body) => {
+                        egui::CollapsingHeader::new("if is_touched()")
+                            .id_salt(&current_id_str)
+                            .default_open(true)
+                            .show(ui, |ui| {
+                                render_block_list(ui, body, this_path.clone(), move_request);
+                            });
+                    }
+                    Statement::Loop(expr, body) => {
+                        egui::CollapsingHeader::new("loop")
+                            .id_salt(&current_id_str)
+                            .default_open(true)
+                            .show(ui, |ui| {
+                                if let Expr::Uint(v) = expr {
+                                    ui.horizontal(|ui| {
+                                        ui.label("Repeat count:");
+                                        ui.add(egui::DragValue::new(v).range(1..=10));
+                                    });
+                                }
+                                render_block_list(ui, body, this_path.clone(), move_request);
+                            });
+                    }
+                    Statement::While(_cond, body) => {
+                        egui::CollapsingHeader::new("while true")
+                            .id_salt(&current_id_str)
+                            .default_open(true)
+                            .show(ui, |ui| {
+                                render_block_list(ui, body, this_path.clone(), move_request);
+                            });
+                    }
+                    _ => {}
+                }
             });
 
         if let Some(payload) = dropped_payload {
             match payload.as_ref() {
                 DraggedBlock::New(new_stmt) => {
-                    blocks.insert(idx, new_stmt.clone());
+                    current_blocks.insert(idx, new_stmt.clone());
                     return;
                 }
-                DraggedBlock::Move {
-                    path_id: src_path,
-                    index: src_idx,
-                } => {
-                    if src_path == path_id && *src_idx != idx {
-                        let moved = blocks.remove(*src_idx);
-                        let insert_idx = if *src_idx < idx { idx - 1 } else { idx };
-                        blocks.insert(insert_idx, moved);
-                        return;
-                    }
-                    if src_path != path_id {
-                        blocks.insert(idx, blocks[*src_idx].clone());
-                        return;
+                DraggedBlock::Move { path: src_path } => {
+                    if !is_ancestor(src_path, &current_path) {
+                        *move_request = Some(MoveRequest {
+                            src_path: src_path.clone(),
+                            target_path: current_path.clone(),
+                            insert_idx: idx,
+                        });
                     }
                 }
             }
@@ -350,34 +463,51 @@ fn render_block_list(ui: &mut egui::Ui, blocks: &mut Vec<Statement>, path_id: &s
 
     let (_, bottom_payload) = ui.dnd_drop_zone::<DraggedBlock, _>(egui::Frame::NONE, |ui| {
         let response =
-            ui.allocate_response(egui::vec2(ui.available_width(), 30.0), egui::Sense::hover());
+            ui.allocate_response(egui::vec2(ui.available_width(), 24.0), egui::Sense::hover());
+
+        let color = if current_blocks.is_empty() {
+            egui::Color32::from_gray(100)
+        } else {
+            egui::Color32::from_gray(60)
+        };
+
         ui.painter().rect_stroke(
             response.rect,
             2.0,
-            egui::Stroke::new(1.0, egui::Color32::from_gray(60)),
+            egui::Stroke::new(1.0, color),
             egui::StrokeKind::Inside,
         );
+
+        if current_blocks.is_empty() {
+            ui.painter().text(
+                response.rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "Drop here",
+                egui::FontId::proportional(11.0),
+                egui::Color32::from_gray(140),
+            );
+        }
     });
 
     if let Some(payload) = bottom_payload {
         match payload.as_ref() {
             DraggedBlock::New(new_stmt) => {
-                blocks.push(new_stmt.clone());
+                current_blocks.push(new_stmt.clone());
             }
-            DraggedBlock::Move {
-                path_id: src_path,
-                index: src_idx,
-            } => {
-                if src_path == path_id {
-                    let moved = blocks.remove(*src_idx);
-                    blocks.push(moved);
+            DraggedBlock::Move { path: src_path } => {
+                if !is_ancestor(src_path, &current_path) {
+                    *move_request = Some(MoveRequest {
+                        src_path: src_path.clone(),
+                        target_path: current_path.clone(),
+                        insert_idx: current_blocks.len(),
+                    });
                 }
             }
         }
     }
 
     if let Some(idx) = delete_target_idx {
-        blocks.remove(idx);
+        current_blocks.remove(idx);
     }
 }
 
