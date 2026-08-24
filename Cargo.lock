@@ -3347,7 +3347,7 @@ dependencies = [
 [[package]]
 name = "keystone-lang"
 version = "0.1.0"
-source = "git+https://github.com/Meowtaverse-Games/keystone-lang.git#999587fbc96004ca8c57b2675f176412699218d3"
+source = "git+https://github.com/Meowtaverse-Games/keystone-lang.git#057ca26c1e75fba9a10b6708d8d2c6a517b971fb"
 dependencies = [
  "chumsky",
  "rand 0.10.2",
@@ -4915,7 +4915,7 @@ dependencies = [
  "cfg-if",
  "libc",
  "psm",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]

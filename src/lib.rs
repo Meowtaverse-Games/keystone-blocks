@@ -3,6 +3,12 @@ use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui};
 
 use keystone_lang::{Direction, Expr, Statement};
 
+#[derive(Clone, PartialEq, Debug)]
+enum DraggedBlock {
+    New(Statement),
+    Move { path_id: String, index: usize },
+}
+
 pub trait ToCode {
     fn to_code(&self) -> String;
 }
@@ -104,50 +110,61 @@ fn vpl_ui_system(mut contexts: EguiContexts, mut state: ResMut<VplState>) -> Res
         .show(ctx, |ui| {
             ui.columns(2, |columns| {
                 let ui_left = &mut columns[0];
-                ui_left.heading("➕ Add Blocks");
+                ui_left.heading("➕ Add Blocks (Drag or Click)");
                 ui_left.separator();
 
-                if ui_left.button("🏃 Move (Direction)").clicked() {
-                    state
-                        .blocks
-                        .push(Statement::Move(Expr::Direction(Direction::Forward)));
-                }
-                if ui_left.button("🔄 Turn (Direction)").clicked() {
-                    state
-                        .blocks
-                        .push(Statement::Turn(Expr::Direction(Direction::Forward)));
-                }
-                if ui_left.button("💬 Print (String)").clicked() {
-                    state
-                        .blocks
-                        .push(Statement::Print(Expr::String("hello".to_string())));
-                }
-                if ui_left.button("💤 Sleep (Float)").clicked() {
-                    state.blocks.push(Statement::Sleep(Expr::Float(1.0)));
-                }
+                render_palette_button(
+                    ui_left,
+                    "🏃 Move (Direction)",
+                    Statement::Move(Expr::Direction(Direction::Forward)),
+                    &mut state.blocks,
+                );
+                render_palette_button(
+                    ui_left,
+                    "🔄 Turn (Direction)",
+                    Statement::Turn(Expr::Direction(Direction::Right)),
+                    &mut state.blocks,
+                );
+                render_palette_button(
+                    ui_left,
+                    "💬 Print (String)",
+                    Statement::Print(Expr::String("hello".to_string())),
+                    &mut state.blocks,
+                );
+                render_palette_button(
+                    ui_left,
+                    "💤 Sleep (Float)",
+                    Statement::Sleep(Expr::Float(1.0)),
+                    &mut state.blocks,
+                );
 
                 ui_left.add_space(10.0);
                 ui_left.label("ーーー Nest Blocks ーーー");
 
-                if ui_left.button("❓ If (is_touched())").clicked() {
-                    state.blocks.push(Statement::If(
+                render_palette_button(
+                    ui_left,
+                    "❓ If (is_touched())",
+                    Statement::If(
                         Expr::Call {
                             callee: keystone_lang::Callee::IsTouched,
                             args: vec![],
                         },
                         Vec::new(),
-                    ));
-                }
-                if ui_left.button("🔁 Loop (Count)").clicked() {
-                    state
-                        .blocks
-                        .push(Statement::Loop(Expr::Uint(3), Vec::new()));
-                }
-                if ui_left.button("🔄 While (true)").clicked() {
-                    state
-                        .blocks
-                        .push(Statement::While(Expr::Boolean(true), Vec::new()));
-                }
+                    ),
+                    &mut state.blocks,
+                );
+                render_palette_button(
+                    ui_left,
+                    "🔁 Loop (Count)",
+                    Statement::Loop(Expr::Uint(3), Vec::new()),
+                    &mut state.blocks,
+                );
+                render_palette_button(
+                    ui_left,
+                    "🔄 While (true)",
+                    Statement::While(Expr::Boolean(true), Vec::new()),
+                    &mut state.blocks,
+                );
 
                 ui_left.add_space(20.0);
                 if ui_left.button("🗑️ Clear All").clicked() {
@@ -160,7 +177,7 @@ fn vpl_ui_system(mut contexts: EguiContexts, mut state: ResMut<VplState>) -> Res
 
                 egui::ScrollArea::vertical().show(ui_right, |ui| {
                     if state.blocks.is_empty() {
-                        ui.label("(No blocks added yet)");
+                        ui.label("(Drag blocks here)");
                     }
                     render_block_list(ui, &mut state.blocks, "root");
                 });
@@ -169,7 +186,6 @@ fn vpl_ui_system(mut contexts: EguiContexts, mut state: ResMut<VplState>) -> Res
             ui.separator();
 
             state.generated_code = statements_to_string(&state.blocks, 0);
-
             ui.heading("GENERATED CODE");
             ui.code(&state.generated_code);
         });
@@ -177,122 +193,189 @@ fn vpl_ui_system(mut contexts: EguiContexts, mut state: ResMut<VplState>) -> Res
     Ok(())
 }
 
+fn render_palette_button(
+    ui: &mut egui::Ui,
+    label: &str,
+    stmt: Statement,
+    target_blocks: &mut Vec<Statement>,
+) {
+    let item_id = egui::Id::new(label);
+    let response = ui.dnd_drag_source(item_id, DraggedBlock::New(stmt.clone()), |ui| {
+        ui.button(label)
+    });
+
+    if response.response.clicked() {
+        target_blocks.push(stmt);
+    }
+}
+
 fn render_block_list(ui: &mut egui::Ui, blocks: &mut Vec<Statement>, path_id: &str) {
     let mut delete_target_idx = None;
-    let mut swap_target = None;
-    let len = blocks.len();
 
-    for idx in 0..len {
+    for idx in 0..blocks.len() {
         let current_id_str = format!("{}_{}", path_id, idx);
+        let block_id = egui::Id::new(&current_id_str);
 
-        ui.horizontal(|ui| {
-            ui.add_enabled_ui(idx > 0, |ui| {
-                if ui.button("⬆").clicked() {
-                    swap_target = Some((idx, idx - 1));
-                }
-            });
-            ui.add_enabled_ui(idx + 1 < len, |ui| {
-                if ui.button("⬇").clicked() {
-                    swap_target = Some((idx, idx + 1));
-                }
-            });
-
-            match &mut blocks[idx] {
-                Statement::Move(expr) => {
-                    ui.label("🏃 Move");
-                    if let Expr::Direction(dir) = expr {
-                        render_direction_combobox(ui, dir, &format!("move_{}", current_id_str));
-                    }
-                }
-                Statement::Turn(expr) => {
-                    ui.label("🔄 Turn");
-                    if let Expr::Direction(dir) = expr {
-                        render_direction_combobox(ui, dir, &format!("turn_{}", current_id_str));
-                    }
-                }
-                Statement::Print(expr) => {
-                    ui.label("💬 Print");
-                    if let Expr::String(s) = expr {
-                        ui.text_edit_singleline(s);
-                    }
-                }
-                Statement::Sleep(expr) => {
-                    ui.label("💤 Sleep");
-                    if let Expr::Float(v) = expr {
-                        ui.add(egui::DragValue::new(v).speed(0.1));
-                        ui.label("sec");
-                    }
-                }
-
-                Statement::If(_cond, body) => {
-                    ui.label("❓ [If]");
-                    ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
-                        egui::CollapsingHeader::new("if is_touched()")
-                            .id_salt(&current_id_str)
-                            .default_open(true)
-                            .show(ui, |ui| {
-                                render_block_list(ui, body, &current_id_str);
-                                ui.horizontal(|ui| {
-                                    if ui.button("➕ Add Move inside").clicked() {
-                                        body.push(Statement::Move(Expr::Direction(
-                                            Direction::Forward,
-                                        )));
-                                    }
-                                });
+        let (_, dropped_payload) =
+            ui.dnd_drop_zone::<DraggedBlock, _>(egui::Frame::NONE.inner_margin(2.0), |ui| {
+                ui.horizontal(|ui| {
+                    ui.dnd_drag_source(
+                        block_id.with("drag_handle"),
+                        DraggedBlock::Move {
+                            path_id: path_id.to_string(),
+                            index: idx,
+                        },
+                        |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label("☰").on_hover_cursor(egui::CursorIcon::Grab);
+                                let label_text = match &blocks[idx] {
+                                    Statement::Move(_) => "🏃 Move",
+                                    Statement::Turn(_) => "🔄 Turn",
+                                    Statement::Print(_) => "💬 Print",
+                                    Statement::Sleep(_) => "💤 Sleep",
+                                    Statement::If(_, _) => "❓ [If]",
+                                    Statement::Loop(_, _) => "🔁 [Loop]",
+                                    Statement::While(_, _) => "🔄 [While]",
+                                    _ => "📄 Statement",
+                                };
+                                ui.label(egui::RichText::new(label_text).strong());
                             });
-                    });
-                }
-                Statement::Loop(expr, body) => {
-                    ui.label("🔁 [Loop]");
-                    let count_str = if let Expr::Uint(v) = expr {
-                        v.to_string()
-                    } else {
-                        "3".to_string()
-                    };
+                        },
+                    );
 
-                    ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
-                        egui::CollapsingHeader::new(format!("loop {}", count_str))
-                            .id_salt(&current_id_str)
-                            .default_open(true)
-                            .show(ui, |ui| {
-                                if let Expr::Uint(v) = expr {
-                                    ui.horizontal(|ui| {
-                                        ui.label("Repeat count:");
-                                        ui.add(egui::DragValue::new(v).range(1..=10));
+                    ui.separator();
+
+                    match &mut blocks[idx] {
+                        Statement::Move(expr) => {
+                            if let Expr::Direction(dir) = expr {
+                                render_direction_combobox(
+                                    ui,
+                                    dir,
+                                    &format!("move_{}", current_id_str),
+                                );
+                            }
+                        }
+                        Statement::Turn(expr) => {
+                            if let Expr::Direction(dir) = expr {
+                                render_direction_combobox(
+                                    ui,
+                                    dir,
+                                    &format!("turn_{}", current_id_str),
+                                );
+                            }
+                        }
+                        Statement::Print(expr) => {
+                            if let Expr::String(s) = expr {
+                                ui.text_edit_singleline(s);
+                            }
+                        }
+                        Statement::Sleep(expr) => {
+                            if let Expr::Float(v) = expr {
+                                ui.add(egui::DragValue::new(v).speed(0.1));
+                                ui.label("sec");
+                            }
+                        }
+                        Statement::If(_cond, body) => {
+                            ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+                                egui::CollapsingHeader::new("if is_touched()")
+                                    .id_salt(&current_id_str)
+                                    .default_open(true)
+                                    .show(ui, |ui| {
+                                        render_block_list(ui, body, &current_id_str);
                                     });
-                                }
-                                render_block_list(ui, body, &current_id_str);
                             });
-                    });
-                }
-                Statement::While(_cond, body) => {
-                    ui.label("🔄 [While]");
-                    ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
-                        egui::CollapsingHeader::new("while true")
-                            .id_salt(&current_id_str)
-                            .default_open(true)
-                            .show(ui, |ui| {
-                                render_block_list(ui, body, &current_id_str);
+                        }
+                        Statement::Loop(expr, body) => {
+                            ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+                                egui::CollapsingHeader::new("loop")
+                                    .id_salt(&current_id_str)
+                                    .default_open(true)
+                                    .show(ui, |ui| {
+                                        if let Expr::Uint(v) = expr {
+                                            ui.horizontal(|ui| {
+                                                ui.label("Repeat count:");
+                                                ui.add(egui::DragValue::new(v).range(1..=10));
+                                            });
+                                        }
+                                        render_block_list(ui, body, &current_id_str);
+                                    });
                             });
+                        }
+                        Statement::While(_cond, body) => {
+                            ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+                                egui::CollapsingHeader::new("while true")
+                                    .id_salt(&current_id_str)
+                                    .default_open(true)
+                                    .show(ui, |ui| {
+                                        render_block_list(ui, body, &current_id_str);
+                                    });
+                            });
+                        }
+                        _ => {}
+                    }
+
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button("❌").clicked() {
+                            delete_target_idx = Some(idx);
+                        }
                     });
+                });
+            });
+
+        if let Some(payload) = dropped_payload {
+            match payload.as_ref() {
+                DraggedBlock::New(new_stmt) => {
+                    blocks.insert(idx, new_stmt.clone());
+                    return;
                 }
-                _ => {
-                    ui.label("📄 Statement");
+                DraggedBlock::Move {
+                    path_id: src_path,
+                    index: src_idx,
+                } => {
+                    if src_path == path_id && *src_idx != idx {
+                        let moved = blocks.remove(*src_idx);
+                        let insert_idx = if *src_idx < idx { idx - 1 } else { idx };
+                        blocks.insert(insert_idx, moved);
+                        return;
+                    }
+                    if src_path != path_id {
+                        blocks.insert(idx, blocks[*src_idx].clone());
+                        return;
+                    }
                 }
             }
+        }
+        ui.add_space(2.0);
+    }
 
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button("❌").clicked() {
-                    delete_target_idx = Some(idx);
+    let (_, bottom_payload) = ui.dnd_drop_zone::<DraggedBlock, _>(egui::Frame::NONE, |ui| {
+        let response =
+            ui.allocate_response(egui::vec2(ui.available_width(), 30.0), egui::Sense::hover());
+        ui.painter().rect_stroke(
+            response.rect,
+            2.0,
+            egui::Stroke::new(1.0, egui::Color32::from_gray(60)),
+            egui::StrokeKind::Inside,
+        );
+    });
+
+    if let Some(payload) = bottom_payload {
+        match payload.as_ref() {
+            DraggedBlock::New(new_stmt) => {
+                blocks.push(new_stmt.clone());
+            }
+            DraggedBlock::Move {
+                path_id: src_path,
+                index: src_idx,
+            } => {
+                if src_path == path_id {
+                    let moved = blocks.remove(*src_idx);
+                    blocks.push(moved);
                 }
-            });
-        });
-        ui.add_space(4.0);
+            }
+        }
     }
 
-    if let Some((from, to)) = swap_target {
-        blocks.swap(from, to);
-    }
     if let Some(idx) = delete_target_idx {
         blocks.remove(idx);
     }
