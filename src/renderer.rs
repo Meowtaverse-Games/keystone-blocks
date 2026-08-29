@@ -1,5 +1,5 @@
 use bevy_egui::egui;
-use keystone_lang::{Direction, Expr, Statement};
+use keystone_lang::{Callee, Direction, Expr, Op, Statement};
 
 use crate::{
     structs::{DraggedBlock, MoveRequest},
@@ -55,12 +55,16 @@ pub fn render_block_list(
                                 let label_text = match &current_blocks[idx] {
                                     Statement::Move(_) => "🏃 Move",
                                     Statement::Turn(_) => "🔄 Turn",
+                                    Statement::Dig(_) => "🔨 Dig",
                                     Statement::Print(_) => "💬 Print",
                                     Statement::Sleep(_) => "💤 Sleep",
+                                    Statement::Let(_, _) => "📝 Let",
+                                    Statement::Send(_) => "📡 Send",
+                                    Statement::Receive(_) => "📥 Receive",
                                     Statement::If(_, _) => "❓ If",
                                     Statement::Loop(_, _) => "🔁 Loop",
                                     Statement::While(_, _) => "🔄 While",
-                                    _ => "📄 Statement",
+                                    // _ => "📄 Statement",
                                 };
                                 ui.label(egui::RichText::new(label_text).strong());
                             });
@@ -88,6 +92,15 @@ pub fn render_block_list(
                                 );
                             }
                         }
+                        Statement::Dig(expr) => {
+                            if let Expr::Direction(dir) = expr {
+                                render_direction_combobox(
+                                    ui,
+                                    dir,
+                                    &format!("turn_{}", current_id_str),
+                                );
+                            }
+                        }
                         Statement::Print(expr) => {
                             if let Expr::String(s) = expr {
                                 ui.text_edit_singleline(s);
@@ -99,6 +112,57 @@ pub fn render_block_list(
                                 ui.label("sec");
                             }
                         }
+                        Statement::Let(name, expr) => {
+                            ui.label("var:");
+                            ui.add(egui::TextEdit::singleline(name).desired_width(60.0));
+                            ui.label("=");
+
+                            match expr {
+                                Expr::Uint(v) => {
+                                    let mut val = *v as i64;
+                                    if ui.add(egui::DragValue::new(&mut val).speed(1)).changed() {
+                                        *v = val.max(0) as u32;
+                                    }
+                                }
+                                Expr::Float(v) => {
+                                    ui.add(egui::DragValue::new(v).speed(0.1));
+                                }
+                                Expr::String(s) => {
+                                    ui.add(egui::TextEdit::singleline(s).desired_width(80.0));
+                                }
+                                _ => {}
+                            }
+                        }
+                        Statement::Send(expr) => {
+                            ui.label("msg:");
+                            match expr {
+                                Expr::String(s) => {
+                                    ui.add(egui::TextEdit::singleline(s).desired_width(100.0));
+                                }
+                                Expr::Uint(v) => {
+                                    let mut val = *v as i64;
+                                    if ui.add(egui::DragValue::new(&mut val).speed(1)).changed() {
+                                        *v = val.max(0) as u32;
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                        Statement::Receive(expr) => {
+                            ui.label("wait msg:");
+                            match expr {
+                                Expr::String(s) => {
+                                    ui.add(egui::TextEdit::singleline(s).desired_width(100.0));
+                                }
+                                Expr::Uint(v) => {
+                                    let mut val = *v as i64;
+                                    if ui.add(egui::DragValue::new(&mut val).speed(1)).changed() {
+                                        *v = val.max(0) as u32;
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
                         _ => {}
                     }
 
@@ -108,8 +172,12 @@ pub fn render_block_list(
                 });
 
                 match &mut current_blocks[idx] {
-                    Statement::If(_cond, body) => {
-                        egui::CollapsingHeader::new("if is_touched()")
+                    Statement::If(cond, body) => {
+                        ui.horizontal(|ui| {
+                            ui.label("if");
+                            render_condition_editor(ui, cond, &current_id_str);
+                        });
+                        egui::CollapsingHeader::new("body")
                             .id_salt(&current_id_str)
                             .default_open(true)
                             .show(ui, |ui| {
@@ -117,7 +185,7 @@ pub fn render_block_list(
                             });
                     }
                     Statement::Loop(expr, body) => {
-                        egui::CollapsingHeader::new("loop")
+                        egui::CollapsingHeader::new("body")
                             .id_salt(&current_id_str)
                             .default_open(true)
                             .show(ui, |ui| {
@@ -130,8 +198,12 @@ pub fn render_block_list(
                                 render_block_list(ui, body, this_path.clone(), move_request);
                             });
                     }
-                    Statement::While(_cond, body) => {
-                        egui::CollapsingHeader::new("while true")
+                    Statement::While(cond, body) => {
+                        ui.horizontal(|ui| {
+                            ui.label("while");
+                            render_condition_editor(ui, cond, &current_id_str);
+                        });
+                        egui::CollapsingHeader::new("body")
                             .id_salt(&current_id_str)
                             .default_open(true)
                             .show(ui, |ui| {
@@ -223,4 +295,120 @@ pub fn render_direction_combobox(ui: &mut egui::Ui, dir: &mut Direction, id_salt
             ui.selectable_value(dir, Direction::Up, "Up");
             ui.selectable_value(dir, Direction::Down, "Down");
         });
+}
+
+fn render_condition_editor(ui: &mut egui::Ui, cond: &mut Expr, id_prefix: &str) {
+    #[derive(Debug, PartialEq, Clone)]
+    enum ConditionKind {
+        IsTouched,
+        IsEmpty,
+        Comparison,
+        Boolean,
+    }
+
+    let current_kind = match cond {
+        Expr::Call {
+            callee: Callee::IsTouched,
+            ..
+        } => ConditionKind::IsTouched,
+        Expr::Call {
+            callee: Callee::IsEmpty,
+            ..
+        } => ConditionKind::IsEmpty,
+        Expr::Binary { .. } => ConditionKind::Comparison,
+        Expr::Boolean(_) => ConditionKind::Boolean,
+        _ => ConditionKind::IsTouched,
+    };
+
+    let mut selected_kind = current_kind.clone();
+
+    egui::ComboBox::from_id_salt(format!("cond_type_{}", id_prefix))
+        .selected_text(match selected_kind {
+            ConditionKind::IsTouched => "is_touched()",
+            ConditionKind::IsEmpty => "is_empty(dir)",
+            ConditionKind::Comparison => "compare",
+            ConditionKind::Boolean => "bool",
+        })
+        .show_ui(ui, |ui| {
+            ui.selectable_value(&mut selected_kind, ConditionKind::IsTouched, "is_touched()");
+            ui.selectable_value(&mut selected_kind, ConditionKind::IsEmpty, "is_empty(dir)");
+            ui.selectable_value(
+                &mut selected_kind,
+                ConditionKind::Comparison,
+                "compare (==, <, >)",
+            );
+            ui.selectable_value(
+                &mut selected_kind,
+                ConditionKind::Boolean,
+                "bool (true / false)",
+            );
+        });
+
+    if format!("{:?}", selected_kind) != format!("{:?}", current_kind) {
+        *cond = match selected_kind {
+            ConditionKind::IsTouched => Expr::Call {
+                callee: Callee::IsTouched,
+                args: vec![],
+            },
+            ConditionKind::IsEmpty => Expr::Call {
+                callee: Callee::IsEmpty,
+                args: vec![Box::new(Expr::Direction(Direction::Forward))],
+            },
+            ConditionKind::Comparison => Expr::Binary {
+                op: Op::Eq,
+                lhs: Box::new(Expr::Var("x".to_string())),
+                rhs: Box::new(Expr::Uint(0)),
+            },
+            ConditionKind::Boolean => Expr::Boolean(true),
+        };
+    }
+
+    match cond {
+        Expr::Call {
+            callee: Callee::IsEmpty,
+            args,
+        } => {
+            if args.is_empty() {
+                args.push(Box::new(Expr::Direction(Direction::Forward)));
+            }
+            if let Expr::Direction(dir) = args[0].as_mut() {
+                render_direction_combobox(ui, dir, &format!("is_empty_dir_{}", id_prefix));
+            }
+        }
+        Expr::Binary { op, lhs, rhs } => {
+            if let Expr::Var(var_name) = lhs.as_mut() {
+                ui.add(egui::TextEdit::singleline(var_name).desired_width(50.0));
+            }
+
+            egui::ComboBox::from_id_salt(format!("bin_op_{}", id_prefix))
+                .selected_text(match op {
+                    Op::Eq => "==",
+                    Op::Neq => "!=",
+                    Op::Lt => "<",
+                    Op::Gt => ">",
+                    Op::Le => "<=",
+                    Op::Ge => ">=",
+                    _ => "==",
+                })
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(op, Op::Eq, "==");
+                    ui.selectable_value(op, Op::Neq, "!=");
+                    ui.selectable_value(op, Op::Lt, "<");
+                    ui.selectable_value(op, Op::Gt, ">");
+                    ui.selectable_value(op, Op::Le, "<=");
+                    ui.selectable_value(op, Op::Ge, ">=");
+                });
+
+            if let Expr::Uint(v) = rhs.as_mut() {
+                let mut val = *v as i64;
+                if ui.add(egui::DragValue::new(&mut val).speed(1)).changed() {
+                    *v = val.max(0) as u32;
+                }
+            }
+        }
+        Expr::Boolean(b) => {
+            ui.checkbox(b, "");
+        }
+        _ => {}
+    }
 }

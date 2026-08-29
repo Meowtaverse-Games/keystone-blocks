@@ -1,4 +1,4 @@
-use keystone_lang::{Direction, Expr, Statement};
+use keystone_lang::{Direction, Expr, Op, Statement, UnaryOp};
 
 pub trait ToCode {
     fn to_code(&self) -> String;
@@ -20,10 +20,32 @@ impl ToCode for Expr {
                 Direction::Down => "down".to_string(),
             },
             Expr::Var(name) => name.clone(),
+
             Expr::Binary { op, lhs, rhs } => {
-                format!("{} {:?} {}", lhs.to_code(), op, rhs.to_code())
+                let op_str = match op {
+                    Op::Eq => "==",
+                    Op::Neq => "!=",
+                    Op::Lt => "<",
+                    Op::Gt => ">",
+                    Op::Le => "<=",
+                    Op::Ge => ">=",
+                    Op::Add => "+",
+                    Op::Sub => "-",
+                    Op::Mul => "*",
+                    Op::Div => "/",
+                    Op::And => "and",
+                    Op::Or => "or",
+                };
+                format!("{} {} {}", lhs.to_code(), op_str, rhs.to_code())
             }
-            Expr::Unary { op, exp } => format!("{:?} {}", op, exp.to_code()),
+
+            Expr::Unary { op, exp } => {
+                let op_str = match op {
+                    UnaryOp::Not => "not",
+                };
+                format!("{} {}", op_str, exp.to_code())
+            }
+
             Expr::Call { callee, args } => {
                 let args_str = args
                     .iter()

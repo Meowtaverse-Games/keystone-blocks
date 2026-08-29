@@ -44,6 +44,12 @@ fn vpl_ui_system(mut contexts: EguiContexts, mut state: ResMut<VplState>) -> Res
                 );
                 render_palette_button(
                     ui_left,
+                    "🔨 Dig (Direction)",
+                    Statement::Dig(Expr::Direction(Direction::Up)),
+                    &mut state.blocks,
+                );
+                render_palette_button(
+                    ui_left,
                     "💬 Print (String)",
                     Statement::Print(Expr::String("hello".to_string())),
                     &mut state.blocks,
@@ -56,7 +62,31 @@ fn vpl_ui_system(mut contexts: EguiContexts, mut state: ResMut<VplState>) -> Res
                 );
 
                 ui_left.add_space(10.0);
-                ui_left.label("ーーー Nest Blocks ーーー");
+                ui_left.label("——— Variables & Events ———");
+
+                render_palette_button(
+                    ui_left,
+                    "📝 Let (Variable)",
+                    Statement::Let("x".to_string(), Expr::Uint(1)),
+                    &mut state.blocks,
+                );
+
+                render_palette_button(
+                    ui_left,
+                    "📡 Send (Event)",
+                    Statement::Send(Expr::String("signal".to_string())),
+                    &mut state.blocks,
+                );
+
+                render_palette_button(
+                    ui_left,
+                    "📥 Receive (Wait)",
+                    Statement::Receive(Expr::String("signal".to_string())),
+                    &mut state.blocks,
+                );
+
+                ui_left.add_space(10.0);
+                ui_left.label("——— Nest Blocks ———");
 
                 render_palette_button(
                     ui_left,
@@ -84,7 +114,7 @@ fn vpl_ui_system(mut contexts: EguiContexts, mut state: ResMut<VplState>) -> Res
                 );
 
                 ui_left.add_space(20.0);
-                if ui_left.button("🗑️ Clear All").clicked() {
+                if ui_left.button("🗑️ CLEAR ALL").clicked() {
                     state.blocks.clear();
                 }
 
