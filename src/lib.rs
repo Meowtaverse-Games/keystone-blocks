@@ -1,14 +1,14 @@
+mod code;
 mod renderer;
 mod structs;
 mod utils;
-mod visual;
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui};
-use keystone_lang::{Direction, Expr, Statement};
+use code::*;
+use keystone_lang::{Callee, Direction, Expr, Op, Statement};
 use renderer::*;
 use structs::*;
 use utils::*;
-use visual::*;
 
 pub struct VisualProgrammingPlugin;
 impl Plugin for VisualProgrammingPlugin {
@@ -111,6 +111,65 @@ fn vpl_ui_system(mut contexts: EguiContexts, mut state: ResMut<VplState>) -> Res
                     "🔄 While (true)",
                     Statement::While(Expr::Boolean(true), Vec::new()),
                     &mut state.blocks,
+                );
+
+                ui_left.add_space(10.0);
+                ui_left.label("——— Value Blocks (Expr) ———");
+
+                render_expr_palette_button(ui_left, "Number (0)", Expr::Uint(0));
+                render_expr_palette_button(ui_left, "Float (0.0)", Expr::Float(0.0));
+                render_expr_palette_button(
+                    ui_left,
+                    "Text (\"hello\")",
+                    Expr::String("hello".to_string()),
+                );
+                render_expr_palette_button(
+                    ui_left,
+                    "Direction (Forward)",
+                    Expr::Direction(Direction::Forward),
+                );
+                render_expr_palette_button(
+                    ui_left,
+                    "rand()",
+                    Expr::Call {
+                        callee: Callee::Rand,
+                        args: vec![],
+                    },
+                );
+                render_expr_palette_button(ui_left, "Variable (x)", Expr::Var("x".to_string()));
+                render_expr_palette_button(
+                    ui_left,
+                    "Comparison (a == b)",
+                    Expr::Binary {
+                        op: Op::Eq,
+                        lhs: Box::new(Expr::Var("x".to_string())),
+                        rhs: Box::new(Expr::Uint(0)),
+                    },
+                );
+                render_expr_palette_button(
+                    ui_left,
+                    "Math (a + b)",
+                    Expr::Binary {
+                        op: Op::Add,
+                        lhs: Box::new(Expr::Var("x".to_string())),
+                        rhs: Box::new(Expr::Uint(1)),
+                    },
+                );
+                render_expr_palette_button(
+                    ui_left,
+                    "is_touched()",
+                    Expr::Call {
+                        callee: Callee::IsTouched,
+                        args: vec![],
+                    },
+                );
+                render_expr_palette_button(
+                    ui_left,
+                    "is_empty(dir)",
+                    Expr::Call {
+                        callee: Callee::IsEmpty,
+                        args: vec![Box::new(Expr::Direction(Direction::Forward))],
+                    },
                 );
 
                 ui_left.add_space(20.0);

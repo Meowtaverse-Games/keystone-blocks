@@ -1,10 +1,12 @@
 use bevy::prelude::*;
-use keystone_lang::Statement;
+use keystone_lang::{Expr, Statement};
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, Debug)]
 pub enum DraggedBlock {
-    New(Statement),
-    Move { path: Vec<usize> },
+    NewStatement(Statement),
+    MoveStatement { path: Vec<usize> },
+
+    NewExpr(Expr),
 }
 
 #[derive(Clone, Debug)]

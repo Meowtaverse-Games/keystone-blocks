@@ -13,7 +13,7 @@ pub fn render_palette_button(
     target_blocks: &mut Vec<Statement>,
 ) {
     let item_id = egui::Id::new(label);
-    let response = ui.dnd_drag_source(item_id, DraggedBlock::New(stmt.clone()), |ui| {
+    let response = ui.dnd_drag_source(item_id, DraggedBlock::NewStatement(stmt.clone()), |ui| {
         ui.button(label)
     });
 
@@ -46,7 +46,7 @@ pub fn render_block_list(
                 ui.horizontal(|ui| {
                     ui.dnd_drag_source(
                         block_id.with("drag_handle"),
-                        DraggedBlock::Move {
+                        DraggedBlock::MoveStatement {
                             path: this_path.clone(),
                         },
                         |ui| {
@@ -64,7 +64,6 @@ pub fn render_block_list(
                                     Statement::If(_, _) => "❓ If",
                                     Statement::Loop(_, _) => "🔁 Loop",
                                     Statement::While(_, _) => "🔄 While",
-                                    // _ => "📄 Statement",
                                 };
                                 ui.label(egui::RichText::new(label_text).strong());
                             });
@@ -74,94 +73,39 @@ pub fn render_block_list(
                     ui.separator();
 
                     match &mut current_blocks[idx] {
-                        Statement::Move(expr) => {
-                            if let Expr::Direction(dir) = expr {
-                                render_direction_combobox(
-                                    ui,
-                                    dir,
-                                    &format!("move_{}", current_id_str),
-                                );
-                            }
-                        }
-                        Statement::Turn(expr) => {
-                            if let Expr::Direction(dir) = expr {
-                                render_direction_combobox(
-                                    ui,
-                                    dir,
-                                    &format!("turn_{}", current_id_str),
-                                );
-                            }
-                        }
-                        Statement::Dig(expr) => {
-                            if let Expr::Direction(dir) = expr {
-                                render_direction_combobox(
-                                    ui,
-                                    dir,
-                                    &format!("turn_{}", current_id_str),
-                                );
-                            }
-                        }
                         Statement::Print(expr) => {
-                            if let Expr::String(s) = expr {
-                                ui.text_edit_singleline(s);
-                            }
+                            render_expr_slot(ui, expr, block_id.with("print_expr"));
                         }
+
                         Statement::Sleep(expr) => {
-                            if let Expr::Float(v) = expr {
-                                ui.add(egui::DragValue::new(v).speed(0.1));
-                                ui.label("sec");
-                            }
+                            render_expr_slot(ui, expr, block_id.with("sleep_expr"));
+                            ui.label("sec");
                         }
+
+                        Statement::Move(expr) => {
+                            render_expr_slot(ui, expr, block_id.with("move_expr"));
+                        }
+
+                        Statement::Turn(expr) => {
+                            render_expr_slot(ui, expr, block_id.with("turn_expr"));
+                        }
+
+                        Statement::Dig(expr) => {
+                            render_expr_slot(ui, expr, block_id.with("dig_expr"));
+                        }
+
                         Statement::Let(name, expr) => {
-                            ui.label("var:");
                             ui.add(egui::TextEdit::singleline(name).desired_width(60.0));
                             ui.label("=");
+                            render_expr_slot(ui, expr, block_id.with("dig_expr"));
+                        }
 
-                            match expr {
-                                Expr::Uint(v) => {
-                                    let mut val = *v as i64;
-                                    if ui.add(egui::DragValue::new(&mut val).speed(1)).changed() {
-                                        *v = val.max(0) as u32;
-                                    }
-                                }
-                                Expr::Float(v) => {
-                                    ui.add(egui::DragValue::new(v).speed(0.1));
-                                }
-                                Expr::String(s) => {
-                                    ui.add(egui::TextEdit::singleline(s).desired_width(80.0));
-                                }
-                                _ => {}
-                            }
-                        }
                         Statement::Send(expr) => {
-                            ui.label("msg:");
-                            match expr {
-                                Expr::String(s) => {
-                                    ui.add(egui::TextEdit::singleline(s).desired_width(100.0));
-                                }
-                                Expr::Uint(v) => {
-                                    let mut val = *v as i64;
-                                    if ui.add(egui::DragValue::new(&mut val).speed(1)).changed() {
-                                        *v = val.max(0) as u32;
-                                    }
-                                }
-                                _ => {}
-                            }
+                            render_expr_slot(ui, expr, block_id.with("send_expr"));
                         }
+
                         Statement::Receive(expr) => {
-                            ui.label("wait msg:");
-                            match expr {
-                                Expr::String(s) => {
-                                    ui.add(egui::TextEdit::singleline(s).desired_width(100.0));
-                                }
-                                Expr::Uint(v) => {
-                                    let mut val = *v as i64;
-                                    if ui.add(egui::DragValue::new(&mut val).speed(1)).changed() {
-                                        *v = val.max(0) as u32;
-                                    }
-                                }
-                                _ => {}
-                            }
+                            render_expr_slot(ui, expr, block_id.with("receive_expr"));
                         }
                         _ => {}
                     }
@@ -175,8 +119,9 @@ pub fn render_block_list(
                     Statement::If(cond, body) => {
                         ui.horizontal(|ui| {
                             ui.label("if");
-                            render_condition_editor(ui, cond, &current_id_str);
+                            render_expr_slot(ui, cond, block_id.with("if_cond"));
                         });
+
                         egui::CollapsingHeader::new("body")
                             .id_salt(&current_id_str)
                             .default_open(true)
@@ -185,24 +130,25 @@ pub fn render_block_list(
                             });
                     }
                     Statement::Loop(expr, body) => {
+                        ui.horizontal(|ui| {
+                            ui.label("🔁 loop");
+                            render_expr_slot(ui, expr, block_id.with("loop_count"));
+                            ui.label("times");
+                        });
+
                         egui::CollapsingHeader::new("body")
                             .id_salt(&current_id_str)
                             .default_open(true)
                             .show(ui, |ui| {
-                                if let Expr::Uint(v) = expr {
-                                    ui.horizontal(|ui| {
-                                        ui.label("Repeat count:");
-                                        ui.add(egui::DragValue::new(v).range(1..=10));
-                                    });
-                                }
                                 render_block_list(ui, body, this_path.clone(), move_request);
                             });
                     }
                     Statement::While(cond, body) => {
                         ui.horizontal(|ui| {
                             ui.label("while");
-                            render_condition_editor(ui, cond, &current_id_str);
+                            render_expr_slot(ui, cond, block_id.with("while_cond"));
                         });
+
                         egui::CollapsingHeader::new("body")
                             .id_salt(&current_id_str)
                             .default_open(true)
@@ -216,11 +162,11 @@ pub fn render_block_list(
 
         if let Some(payload) = dropped_payload {
             match payload.as_ref() {
-                DraggedBlock::New(new_stmt) => {
+                DraggedBlock::NewStatement(new_stmt) => {
                     current_blocks.insert(idx, new_stmt.clone());
                     return;
                 }
-                DraggedBlock::Move { path: src_path } => {
+                DraggedBlock::MoveStatement { path: src_path } => {
                     if !is_ancestor(src_path, &current_path) {
                         *move_request = Some(MoveRequest {
                             src_path: src_path.clone(),
@@ -229,6 +175,7 @@ pub fn render_block_list(
                         });
                     }
                 }
+                _ => {}
             }
         }
         ui.add_space(2.0);
@@ -264,10 +211,10 @@ pub fn render_block_list(
 
     if let Some(payload) = bottom_payload {
         match payload.as_ref() {
-            DraggedBlock::New(new_stmt) => {
+            DraggedBlock::NewStatement(new_stmt) => {
                 current_blocks.push(new_stmt.clone());
             }
-            DraggedBlock::Move { path: src_path } => {
+            DraggedBlock::MoveStatement { path: src_path } => {
                 if !is_ancestor(src_path, &current_path) {
                     *move_request = Some(MoveRequest {
                         src_path: src_path.clone(),
@@ -276,6 +223,7 @@ pub fn render_block_list(
                     });
                 }
             }
+            _ => {}
         }
     }
 
@@ -297,118 +245,113 @@ pub fn render_direction_combobox(ui: &mut egui::Ui, dir: &mut Direction, id_salt
         });
 }
 
-fn render_condition_editor(ui: &mut egui::Ui, cond: &mut Expr, id_prefix: &str) {
-    #[derive(Debug, PartialEq, Clone)]
-    enum ConditionKind {
-        IsTouched,
-        IsEmpty,
-        Comparison,
-        Boolean,
-    }
+pub fn render_expr_slot(ui: &mut egui::Ui, expr: &mut Expr, slot_id: egui::Id) {
+    let frame = egui::Frame::group(ui.style())
+        .inner_margin(4.0)
+        .corner_radius(8.0)
+        .fill(egui::Color32::from_rgb(45, 55, 70));
 
-    let current_kind = match cond {
-        Expr::Call {
-            callee: Callee::IsTouched,
-            ..
-        } => ConditionKind::IsTouched,
-        Expr::Call {
-            callee: Callee::IsEmpty,
-            ..
-        } => ConditionKind::IsEmpty,
-        Expr::Binary { .. } => ConditionKind::Comparison,
-        Expr::Boolean(_) => ConditionKind::Boolean,
-        _ => ConditionKind::IsTouched,
-    };
-
-    let mut selected_kind = current_kind.clone();
-
-    egui::ComboBox::from_id_salt(format!("cond_type_{}", id_prefix))
-        .selected_text(match selected_kind {
-            ConditionKind::IsTouched => "is_touched()",
-            ConditionKind::IsEmpty => "is_empty(dir)",
-            ConditionKind::Comparison => "compare",
-            ConditionKind::Boolean => "bool",
-        })
-        .show_ui(ui, |ui| {
-            ui.selectable_value(&mut selected_kind, ConditionKind::IsTouched, "is_touched()");
-            ui.selectable_value(&mut selected_kind, ConditionKind::IsEmpty, "is_empty(dir)");
-            ui.selectable_value(
-                &mut selected_kind,
-                ConditionKind::Comparison,
-                "compare (==, <, >)",
-            );
-            ui.selectable_value(
-                &mut selected_kind,
-                ConditionKind::Boolean,
-                "bool (true / false)",
-            );
-        });
-
-    if format!("{:?}", selected_kind) != format!("{:?}", current_kind) {
-        *cond = match selected_kind {
-            ConditionKind::IsTouched => Expr::Call {
-                callee: Callee::IsTouched,
-                args: vec![],
-            },
-            ConditionKind::IsEmpty => Expr::Call {
-                callee: Callee::IsEmpty,
-                args: vec![Box::new(Expr::Direction(Direction::Forward))],
-            },
-            ConditionKind::Comparison => Expr::Binary {
-                op: Op::Eq,
-                lhs: Box::new(Expr::Var("x".to_string())),
-                rhs: Box::new(Expr::Uint(0)),
-            },
-            ConditionKind::Boolean => Expr::Boolean(true),
-        };
-    }
-
-    match cond {
-        Expr::Call {
-            callee: Callee::IsEmpty,
-            args,
-        } => {
-            if args.is_empty() {
-                args.push(Box::new(Expr::Direction(Direction::Forward)));
-            }
-            if let Expr::Direction(dir) = args[0].as_mut() {
-                render_direction_combobox(ui, dir, &format!("is_empty_dir_{}", id_prefix));
-            }
-        }
-        Expr::Binary { op, lhs, rhs } => {
-            if let Expr::Var(var_name) = lhs.as_mut() {
-                ui.add(egui::TextEdit::singleline(var_name).desired_width(50.0));
+    let (_, dropped_payload) = ui.dnd_drop_zone::<DraggedBlock, _>(frame, |ui| {
+        ui.horizontal(|ui| match expr {
+            Expr::Var(name) => {
+                ui.add(egui::TextEdit::singleline(name).desired_width(50.0));
             }
 
-            egui::ComboBox::from_id_salt(format!("bin_op_{}", id_prefix))
-                .selected_text(match op {
-                    Op::Eq => "==",
-                    Op::Neq => "!=",
-                    Op::Lt => "<",
-                    Op::Gt => ">",
-                    Op::Le => "<=",
-                    Op::Ge => ">=",
-                    _ => "==",
-                })
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(op, Op::Eq, "==");
-                    ui.selectable_value(op, Op::Neq, "!=");
-                    ui.selectable_value(op, Op::Lt, "<");
-                    ui.selectable_value(op, Op::Gt, ">");
-                    ui.selectable_value(op, Op::Le, "<=");
-                    ui.selectable_value(op, Op::Ge, ">=");
-                });
-
-            if let Expr::Uint(v) = rhs.as_mut() {
+            Expr::Uint(v) => {
                 let mut val = *v as i64;
                 if ui.add(egui::DragValue::new(&mut val).speed(1)).changed() {
                     *v = val.max(0) as u32;
                 }
             }
+
+            Expr::Binary { op, lhs, rhs } => {
+                render_expr_slot(ui, lhs, slot_id.with("lhs"));
+
+                egui::ComboBox::from_id_salt(slot_id.with("op"))
+                    .selected_text(match op {
+                        Op::Eq => "==",
+                        Op::Neq => "!=",
+                        Op::Lt => "<",
+                        Op::Gt => ">",
+                        Op::Le => "<=",
+                        Op::Ge => ">=",
+                        Op::Add => "+",
+                        Op::Sub => "-",
+                        Op::Mul => "*",
+                        Op::Div => "/",
+                        Op::And => "and",
+                        Op::Or => "or",
+                    })
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(op, Op::Eq, "==");
+                        ui.selectable_value(op, Op::Neq, "!=");
+                        ui.selectable_value(op, Op::Lt, "<");
+                        ui.selectable_value(op, Op::Gt, ">");
+                        ui.selectable_value(op, Op::Le, "<=");
+                        ui.selectable_value(op, Op::Ge, ">=");
+                        ui.selectable_value(op, Op::Add, "+");
+                        ui.selectable_value(op, Op::Sub, "-");
+                        ui.selectable_value(op, Op::Mul, "*");
+                        ui.selectable_value(op, Op::Div, "/");
+                        ui.selectable_value(op, Op::And, "and");
+                        ui.selectable_value(op, Op::Or, "or");
+                    });
+
+                render_expr_slot(ui, rhs, slot_id.with("rhs"));
+            }
+
+            Expr::Unary { op: _op, exp } => {
+                ui.label("not");
+                render_expr_slot(ui, exp, slot_id.with("inner"));
+            }
+
+            Expr::Call { callee, args } => {
+                let name = match callee {
+                    Callee::IsTouched => "is_touched",
+                    Callee::IsEmpty => "is_empty",
+                    Callee::Rand => "rand",
+                };
+                ui.label(format!("{}()", name));
+
+                for (idx, arg) in args.iter_mut().enumerate() {
+                    render_expr_slot(ui, arg, slot_id.with(idx));
+                }
+            }
+
+            Expr::Boolean(b) => {
+                ui.checkbox(b, if *b { "true" } else { "false" });
+            }
+
+            Expr::Direction(dir) => {
+                render_direction_combobox(ui, dir, &slot_id.with("dir").value().to_string());
+            }
+
+            Expr::String(s) => {
+                ui.add(egui::TextEdit::singleline(s).desired_width(80.0));
+            }
+
+            Expr::Float(v) => {
+                ui.add(egui::DragValue::new(v).speed(0.1));
+            }
+        });
+    });
+
+    if let Some(payload) = dropped_payload {
+        if let DraggedBlock::NewExpr(new_expr) = payload.as_ref() {
+            *expr = new_expr.clone();
         }
-        Expr::Boolean(b) => {
-            ui.checkbox(b, "");
-        }
-        _ => {}
     }
+}
+
+pub fn render_expr_palette_button(ui: &mut egui::Ui, label: &str, expr: Expr) {
+    ui.dnd_drag_source(
+        egui::Id::new(label),
+        DraggedBlock::NewExpr(expr.clone()),
+        |ui| {
+            ui.add(
+                egui::Button::new(egui::RichText::new(label).color(egui::Color32::LIGHT_GREEN))
+                    .fill(egui::Color32::from_rgb(40, 60, 50)),
+            );
+        },
+    );
 }
