@@ -77,3 +77,19 @@ pub fn adjust_path_after_removal(target_path: &[usize], removed_path: &[usize]) 
 
     adjusted
 }
+
+pub fn get_stmt_info(stmt: &Statement) -> (&'static str, &'static str) {
+    match stmt {
+        Statement::Move(_) => ("🏃", "Move"),
+        Statement::Turn(_) => ("🔄", "Turn"),
+        Statement::Dig(_) => ("🔨", "Dig"),
+        Statement::Print(_) => ("💬", "Print"),
+        Statement::Sleep(_) => ("💤", "Sleep"),
+        Statement::Let(_, _) => ("📝", "Let"),
+        Statement::Send(_) => ("📡", "Send"),
+        Statement::Receive(_) => ("📥", "Receive"),
+        Statement::If(_, _) => ("❓", "If"),
+        Statement::Loop(_, _) => ("🔁", "Loop"),
+        Statement::While(_, _) => ("🔄", "While"),
+    }
+}

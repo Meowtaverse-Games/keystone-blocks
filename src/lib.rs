@@ -1,12 +1,14 @@
 mod code;
+mod colorizer;
 mod renderer;
+
 mod structs;
 mod utils;
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui};
 use code::*;
 use keystone_lang::{Callee, Direction, Expr, Op, Statement};
-use renderer::*;
+use renderer as render;
 use structs::*;
 use utils::*;
 
@@ -30,31 +32,31 @@ fn vpl_ui_system(mut contexts: EguiContexts, mut state: ResMut<VplState>) -> Res
                 ui_left.heading("➕ Add Blocks (Drag or Click)");
                 ui_left.separator();
 
-                render_palette_button(
+                render::palette_button(
                     ui_left,
                     "🏃 Move (Direction)",
                     Statement::Move(Expr::Direction(Direction::Forward)),
                     &mut state.blocks,
                 );
-                render_palette_button(
+                render::palette_button(
                     ui_left,
                     "🔄 Turn (Direction)",
                     Statement::Turn(Expr::Direction(Direction::Right)),
                     &mut state.blocks,
                 );
-                render_palette_button(
+                render::palette_button(
                     ui_left,
                     "🔨 Dig (Direction)",
                     Statement::Dig(Expr::Direction(Direction::Up)),
                     &mut state.blocks,
                 );
-                render_palette_button(
+                render::palette_button(
                     ui_left,
                     "💬 Print (String)",
                     Statement::Print(Expr::String("hello".to_string())),
                     &mut state.blocks,
                 );
-                render_palette_button(
+                render::palette_button(
                     ui_left,
                     "💤 Sleep (Float)",
                     Statement::Sleep(Expr::Float(1.0)),
@@ -64,21 +66,21 @@ fn vpl_ui_system(mut contexts: EguiContexts, mut state: ResMut<VplState>) -> Res
                 ui_left.add_space(10.0);
                 ui_left.label("——— Variables & Events ———");
 
-                render_palette_button(
+                render::palette_button(
                     ui_left,
                     "📝 Let (Variable)",
                     Statement::Let("x".to_string(), Expr::Uint(1)),
                     &mut state.blocks,
                 );
 
-                render_palette_button(
+                render::palette_button(
                     ui_left,
                     "📡 Send (Event)",
                     Statement::Send(Expr::String("signal".to_string())),
                     &mut state.blocks,
                 );
 
-                render_palette_button(
+                render::palette_button(
                     ui_left,
                     "📥 Receive (Wait)",
                     Statement::Receive(Expr::String("signal".to_string())),
@@ -88,7 +90,7 @@ fn vpl_ui_system(mut contexts: EguiContexts, mut state: ResMut<VplState>) -> Res
                 ui_left.add_space(10.0);
                 ui_left.label("——— Nest Blocks ———");
 
-                render_palette_button(
+                render::palette_button(
                     ui_left,
                     "❓ If (is_touched())",
                     Statement::If(
@@ -100,13 +102,13 @@ fn vpl_ui_system(mut contexts: EguiContexts, mut state: ResMut<VplState>) -> Res
                     ),
                     &mut state.blocks,
                 );
-                render_palette_button(
+                render::palette_button(
                     ui_left,
                     "🔁 Loop (Count)",
                     Statement::Loop(Expr::Uint(3), Vec::new()),
                     &mut state.blocks,
                 );
-                render_palette_button(
+                render::palette_button(
                     ui_left,
                     "🔄 While (true)",
                     Statement::While(Expr::Boolean(true), Vec::new()),
@@ -116,19 +118,19 @@ fn vpl_ui_system(mut contexts: EguiContexts, mut state: ResMut<VplState>) -> Res
                 ui_left.add_space(10.0);
                 ui_left.label("——— Value Blocks (Expr) ———");
 
-                render_expr_palette_button(ui_left, "Number (0)", Expr::Uint(0));
-                render_expr_palette_button(ui_left, "Float (0.0)", Expr::Float(0.0));
-                render_expr_palette_button(
+                render::expr_palette_button(ui_left, "Number (0)", Expr::Uint(0));
+                render::expr_palette_button(ui_left, "Float (0.0)", Expr::Float(0.0));
+                render::expr_palette_button(
                     ui_left,
                     "Text (\"hello\")",
                     Expr::String("hello".to_string()),
                 );
-                render_expr_palette_button(
+                render::expr_palette_button(
                     ui_left,
                     "Direction (Forward)",
                     Expr::Direction(Direction::Forward),
                 );
-                render_expr_palette_button(
+                render::expr_palette_button(
                     ui_left,
                     "rand()",
                     Expr::Call {
@@ -136,8 +138,8 @@ fn vpl_ui_system(mut contexts: EguiContexts, mut state: ResMut<VplState>) -> Res
                         args: vec![],
                     },
                 );
-                render_expr_palette_button(ui_left, "Variable (x)", Expr::Var("x".to_string()));
-                render_expr_palette_button(
+                render::expr_palette_button(ui_left, "Variable (x)", Expr::Var("x".to_string()));
+                render::expr_palette_button(
                     ui_left,
                     "Comparison (a == b)",
                     Expr::Binary {
@@ -146,7 +148,7 @@ fn vpl_ui_system(mut contexts: EguiContexts, mut state: ResMut<VplState>) -> Res
                         rhs: Box::new(Expr::Uint(0)),
                     },
                 );
-                render_expr_palette_button(
+                render::expr_palette_button(
                     ui_left,
                     "Math (a + b)",
                     Expr::Binary {
@@ -155,7 +157,7 @@ fn vpl_ui_system(mut contexts: EguiContexts, mut state: ResMut<VplState>) -> Res
                         rhs: Box::new(Expr::Uint(1)),
                     },
                 );
-                render_expr_palette_button(
+                render::expr_palette_button(
                     ui_left,
                     "is_touched()",
                     Expr::Call {
@@ -163,7 +165,7 @@ fn vpl_ui_system(mut contexts: EguiContexts, mut state: ResMut<VplState>) -> Res
                         args: vec![],
                     },
                 );
-                render_expr_palette_button(
+                render::expr_palette_button(
                     ui_left,
                     "is_empty(dir)",
                     Expr::Call {
@@ -188,7 +190,7 @@ fn vpl_ui_system(mut contexts: EguiContexts, mut state: ResMut<VplState>) -> Res
 
                     let mut move_request = None;
 
-                    render_block_list(ui, &mut state.blocks, Vec::new(), &mut move_request);
+                    render::block_list(ui, &mut state.blocks, Vec::new(), &mut move_request);
 
                     if let Some(req) = move_request {
                         if let Some(moved_block) =
