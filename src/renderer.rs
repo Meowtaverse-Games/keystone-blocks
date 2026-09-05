@@ -15,6 +15,10 @@ fn get_block_frame(color: egui::Color32) -> egui::Frame {
         .inner_margin(egui::Margin::symmetric(8, 6))
 }
 
+fn unselectable_label(ui: &mut egui::Ui, text: egui::RichText) -> egui::Response {
+    ui.add(egui::Label::new(text).selectable(false))
+}
+
 pub fn palette_button(
     ui: &mut egui::Ui,
     label: &str,
@@ -27,14 +31,16 @@ pub fn palette_button(
     let response = ui.dnd_drag_source(item_id, DraggedBlock::NewStatement(stmt.clone()), |ui| {
         get_block_frame(color).show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.label(
+                unselectable_label(
+                    ui,
                     egui::RichText::new("☰")
                         .color(colors::TEXT_WHITE)
                         .size(13.0),
                 )
                 .on_hover_cursor(egui::CursorIcon::Grab);
 
-                ui.label(
+                unselectable_label(
+                    ui,
                     egui::RichText::new(label)
                         .color(colors::TEXT_WHITE)
                         .strong(),
@@ -82,18 +88,21 @@ pub fn block_list(
                             },
                             |ui| {
                                 ui.horizontal(|ui| {
-                                    ui.label(
+                                    unselectable_label(
+                                        ui,
                                         egui::RichText::new("☰")
                                             .color(colors::TEXT_WHITE)
                                             .size(13.0),
                                     )
                                     .on_hover_cursor(egui::CursorIcon::Grab);
 
-                                    ui.label(
+                                    unselectable_label(
+                                        ui,
                                         egui::RichText::new(format!("{} {}", icon, name))
                                             .color(colors::TEXT_WHITE)
                                             .strong(),
-                                    );
+                                    )
+                                    .on_hover_cursor(egui::CursorIcon::Grab);
                                 });
                             },
                         );
@@ -106,7 +115,10 @@ pub fn block_list(
                             }
                             Statement::Sleep(expr) => {
                                 expr_slot(ui, expr, block_id.with("sleep_expr"));
-                                ui.label(egui::RichText::new("sec").color(colors::TEXT_WHITE));
+                                unselectable_label(
+                                    ui,
+                                    egui::RichText::new("sec").color(colors::TEXT_WHITE),
+                                );
                             }
                             Statement::Move(expr) => {
                                 expr_slot(ui, expr, block_id.with("move_expr"));
@@ -123,7 +135,8 @@ pub fn block_list(
                                         .desired_width(50.0)
                                         .margin(egui::Margin::symmetric(4, 1)),
                                 );
-                                ui.label(
+                                unselectable_label(
+                                    ui,
                                     egui::RichText::new("=").color(colors::TEXT_WHITE).strong(),
                                 );
                                 expr_slot(ui, expr, block_id.with("let_expr"));
@@ -153,7 +166,8 @@ pub fn block_list(
                     match &mut current_blocks[idx] {
                         Statement::If(cond, body) => {
                             ui.horizontal(|ui| {
-                                ui.label(
+                                unselectable_label(
+                                    ui,
                                     egui::RichText::new("if").color(colors::TEXT_WHITE).strong(),
                                 );
                                 expr_slot(ui, cond, block_id.with("if_cond"));
@@ -170,13 +184,17 @@ pub fn block_list(
                         }
                         Statement::Loop(expr, body) => {
                             ui.horizontal(|ui| {
-                                ui.label(
+                                unselectable_label(
+                                    ui,
                                     egui::RichText::new("🔁 loop")
                                         .color(colors::TEXT_WHITE)
                                         .strong(),
                                 );
                                 expr_slot(ui, expr, block_id.with("loop_count"));
-                                ui.label(egui::RichText::new("times").color(colors::TEXT_WHITE));
+                                unselectable_label(
+                                    ui,
+                                    egui::RichText::new("times").color(colors::TEXT_WHITE),
+                                );
                             });
 
                             egui::CollapsingHeader::new(
@@ -190,7 +208,8 @@ pub fn block_list(
                         }
                         Statement::While(cond, body) => {
                             ui.horizontal(|ui| {
-                                ui.label(
+                                unselectable_label(
+                                    ui,
                                     egui::RichText::new("while")
                                         .color(colors::TEXT_WHITE)
                                         .strong(),
@@ -359,7 +378,7 @@ pub fn expr_slot(ui: &mut egui::Ui, expr: &mut Expr, slot_id: egui::Id) {
             }
 
             Expr::Unary { op: _op, exp } => {
-                ui.label(egui::RichText::new("not").color(colors::TEXT_WHITE));
+                unselectable_label(ui, egui::RichText::new("not").color(colors::TEXT_WHITE));
                 expr_slot(ui, exp, slot_id.with("inner"));
             }
 
@@ -369,7 +388,10 @@ pub fn expr_slot(ui: &mut egui::Ui, expr: &mut Expr, slot_id: egui::Id) {
                     Callee::IsEmpty => "is_empty",
                     Callee::Rand => "rand",
                 };
-                ui.label(egui::RichText::new(format!("{}()", name)).color(colors::TEXT_WHITE));
+                unselectable_label(
+                    ui,
+                    egui::RichText::new(format!("{}()", name)).color(colors::TEXT_WHITE),
+                );
 
                 for (idx, arg) in args.iter_mut().enumerate() {
                     expr_slot(ui, arg, slot_id.with(idx));
