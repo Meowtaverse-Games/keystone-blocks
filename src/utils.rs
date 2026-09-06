@@ -1,4 +1,4 @@
-use keystone_lang::Statement;
+use keystone_lang::{Callee, Expr, Op, Statement, Type, UnaryOp};
 
 pub fn remove_statement_at_path(blocks: &mut Vec<Statement>, path: &[usize]) -> Option<Statement> {
     if path.is_empty() {
@@ -92,4 +92,42 @@ pub fn get_stmt_info(stmt: &Statement) -> (&'static str, &'static str) {
         Statement::Loop(_, _) => ("🔁", "Loop"),
         Statement::While(_, _) => ("🔄", "While"),
     }
+}
+
+pub fn infer_expr_type(expr: &Expr) -> Option<Type> {
+    match expr {
+        Expr::Uint(_) => Some(Type::Uint),
+        Expr::Float(_) => Some(Type::Float),
+        Expr::String(_) => Some(Type::String),
+        Expr::Boolean(_) => Some(Type::Boolean),
+        Expr::Direction(_) => Some(Type::Direction),
+        Expr::Unary { op, .. } => match op {
+            UnaryOp::Not => Some(Type::Boolean),
+        },
+        Expr::Binary { op, .. } => match op {
+            Op::Eq | Op::Neq | Op::Lt | Op::Gt | Op::Le | Op::Ge | Op::And | Op::Or => {
+                Some(Type::Boolean)
+            }
+            Op::Add | Op::Sub | Op::Mul | Op::Div => None,
+        },
+        Expr::Call { callee, .. } => match callee {
+            Callee::IsTouched | Callee::IsEmpty => Some(Type::Boolean),
+            Callee::Rand => Some(Type::Uint),
+        },
+        Expr::Var(_) => None,
+    }
+}
+
+pub fn is_type_compatible(expected: Option<Type>, incoming: &Expr) -> bool {
+    let expected_type = match expected {
+        Some(t) => t,
+        None => return true,
+    };
+
+    let incoming_type = match infer_expr_type(incoming) {
+        Some(t) => t,
+        None => return true,
+    };
+
+    expected_type == incoming_type
 }

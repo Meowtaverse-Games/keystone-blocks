@@ -1,7 +1,8 @@
-use crate::colorizer::*;
 use crate::utils::get_stmt_info;
+use crate::{colorizer::*, utils::is_type_compatible};
 use bevy_egui::egui;
-use keystone_lang::{Callee, Direction, Expr, Op, Statement};
+
+use keystone_lang::{Callee, Direction, Expr, Op, Statement, Type, UnaryOp};
 
 use crate::{
     structs::{DraggedBlock, MoveRequest},
@@ -72,7 +73,6 @@ pub fn block_list(
             .collect::<Vec<_>>()
             .join("_");
         let block_id = egui::Id::new(&current_id_str);
-
         let block_color = get_stmt_color(&current_blocks[idx]);
 
         let (_, dropped_payload) = ui.dnd_drop_zone::<DraggedBlock, _>(egui::Frame::NONE, |ui| {
@@ -111,23 +111,38 @@ pub fn block_list(
 
                         match &mut current_blocks[idx] {
                             Statement::Print(expr) => {
-                                expr_slot(ui, expr, block_id.with("print_expr"));
+                                expr_slot(ui, expr, block_id.with("print_expr"), None);
                             }
                             Statement::Sleep(expr) => {
-                                expr_slot(ui, expr, block_id.with("sleep_expr"));
+                                expr_slot(ui, expr, block_id.with("sleep_expr"), Some(Type::Float));
                                 unselectable_label(
                                     ui,
                                     egui::RichText::new("sec").color(colors::TEXT_WHITE),
                                 );
                             }
                             Statement::Move(expr) => {
-                                expr_slot(ui, expr, block_id.with("move_expr"));
+                                expr_slot(
+                                    ui,
+                                    expr,
+                                    block_id.with("move_expr"),
+                                    Some(Type::Direction),
+                                );
                             }
                             Statement::Turn(expr) => {
-                                expr_slot(ui, expr, block_id.with("turn_expr"));
+                                expr_slot(
+                                    ui,
+                                    expr,
+                                    block_id.with("turn_expr"),
+                                    Some(Type::Direction),
+                                );
                             }
                             Statement::Dig(expr) => {
-                                expr_slot(ui, expr, block_id.with("dig_expr"));
+                                expr_slot(
+                                    ui,
+                                    expr,
+                                    block_id.with("dig_expr"),
+                                    Some(Type::Direction),
+                                );
                             }
                             Statement::Let(name, expr) => {
                                 ui.add(
@@ -139,13 +154,13 @@ pub fn block_list(
                                     ui,
                                     egui::RichText::new("=").color(colors::TEXT_WHITE).strong(),
                                 );
-                                expr_slot(ui, expr, block_id.with("let_expr"));
+                                expr_slot(ui, expr, block_id.with("let_expr"), None);
                             }
                             Statement::Send(expr) => {
-                                expr_slot(ui, expr, block_id.with("send_expr"));
+                                expr_slot(ui, expr, block_id.with("send_expr"), None);
                             }
                             Statement::Receive(expr) => {
-                                expr_slot(ui, expr, block_id.with("receive_expr"));
+                                expr_slot(ui, expr, block_id.with("receive_expr"), None);
                             }
                             _ => {}
                         }
@@ -170,7 +185,7 @@ pub fn block_list(
                                     ui,
                                     egui::RichText::new("if").color(colors::TEXT_WHITE).strong(),
                                 );
-                                expr_slot(ui, cond, block_id.with("if_cond"));
+                                expr_slot(ui, cond, block_id.with("if_cond"), Some(Type::Boolean));
                             });
 
                             egui::CollapsingHeader::new(
@@ -190,7 +205,7 @@ pub fn block_list(
                                         .color(colors::TEXT_WHITE)
                                         .strong(),
                                 );
-                                expr_slot(ui, expr, block_id.with("loop_count"));
+                                expr_slot(ui, expr, block_id.with("loop_count"), Some(Type::Uint));
                                 unselectable_label(
                                     ui,
                                     egui::RichText::new("times").color(colors::TEXT_WHITE),
@@ -214,7 +229,12 @@ pub fn block_list(
                                         .color(colors::TEXT_WHITE)
                                         .strong(),
                                 );
-                                expr_slot(ui, cond, block_id.with("while_cond"));
+                                expr_slot(
+                                    ui,
+                                    cond,
+                                    block_id.with("while_cond"),
+                                    Some(Type::Boolean),
+                                );
                             });
 
                             egui::CollapsingHeader::new(
@@ -317,7 +337,12 @@ pub fn direction_combobox(ui: &mut egui::Ui, dir: &mut Direction, id_salt: &str)
         });
 }
 
-pub fn expr_slot(ui: &mut egui::Ui, expr: &mut Expr, slot_id: egui::Id) {
+pub fn expr_slot(
+    ui: &mut egui::Ui,
+    expr: &mut Expr,
+    slot_id: egui::Id,
+    expected_type: Option<Type>,
+) {
     let frame = egui::Frame::NONE
         .inner_margin(egui::Margin::symmetric(5, 2))
         .corner_radius(egui::CornerRadius::same(8))
@@ -341,8 +366,28 @@ pub fn expr_slot(ui: &mut egui::Ui, expr: &mut Expr, slot_id: egui::Id) {
                 }
             }
 
+            Expr::Float(v) => {
+                ui.add(egui::DragValue::new(v).speed(0.1));
+            }
+
+            Expr::String(s) => {
+                ui.add(
+                    egui::TextEdit::singleline(s)
+                        .desired_width(80.0)
+                        .margin(egui::Margin::symmetric(4, 1)),
+                );
+            }
+
+            Expr::Boolean(b) => {
+                ui.checkbox(b, if *b { "true" } else { "false" });
+            }
+
+            Expr::Direction(dir) => {
+                direction_combobox(ui, dir, &slot_id.with("dir").value().to_string());
+            }
+
             Expr::Binary { op, lhs, rhs } => {
-                expr_slot(ui, lhs, slot_id.with("lhs"));
+                expr_slot(ui, lhs, slot_id.with("lhs"), None);
 
                 egui::ComboBox::from_id_salt(slot_id.with("op"))
                     .selected_text(match op {
@@ -374,12 +419,18 @@ pub fn expr_slot(ui: &mut egui::Ui, expr: &mut Expr, slot_id: egui::Id) {
                         ui.selectable_value(op, Op::Or, "or");
                     });
 
-                expr_slot(ui, rhs, slot_id.with("rhs"));
+                expr_slot(ui, rhs, slot_id.with("rhs"), None);
             }
 
-            Expr::Unary { op: _op, exp } => {
-                unselectable_label(ui, egui::RichText::new("not").color(colors::TEXT_WHITE));
-                expr_slot(ui, exp, slot_id.with("inner"));
+            Expr::Unary { op, exp } => {
+                let label_text = match op {
+                    UnaryOp::Not => "not",
+                };
+                unselectable_label(
+                    ui,
+                    egui::RichText::new(label_text).color(colors::TEXT_WHITE),
+                );
+                expr_slot(ui, exp, slot_id.with("inner"), Some(Type::Boolean));
             }
 
             Expr::Call { callee, args } => {
@@ -394,35 +445,17 @@ pub fn expr_slot(ui: &mut egui::Ui, expr: &mut Expr, slot_id: egui::Id) {
                 );
 
                 for (idx, arg) in args.iter_mut().enumerate() {
-                    expr_slot(ui, arg, slot_id.with(idx));
+                    expr_slot(ui, arg, slot_id.with(idx), None);
                 }
-            }
-
-            Expr::Boolean(b) => {
-                ui.checkbox(b, if *b { "true" } else { "false" });
-            }
-
-            Expr::Direction(dir) => {
-                direction_combobox(ui, dir, &slot_id.with("dir").value().to_string());
-            }
-
-            Expr::String(s) => {
-                ui.add(
-                    egui::TextEdit::singleline(s)
-                        .desired_width(80.0)
-                        .margin(egui::Margin::symmetric(4, 1)),
-                );
-            }
-
-            Expr::Float(v) => {
-                ui.add(egui::DragValue::new(v).speed(0.1));
             }
         });
     });
 
     if let Some(payload) = dropped_payload {
         if let DraggedBlock::NewExpr(new_expr) = payload.as_ref() {
-            *expr = new_expr.clone();
+            if is_type_compatible(expected_type, new_expr) {
+                *expr = new_expr.clone();
+            }
         }
     }
 }
