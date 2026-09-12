@@ -190,10 +190,6 @@ fn vpl_ui_system(mut contexts: EguiContexts, mut state: ResMut<VplState>) -> Res
                 egui::ScrollArea::vertical()
                     .id_salt("right_program_scroll")
                     .show(ui_right, |ui| {
-                        if state.blocks.is_empty() {
-                            ui.label("(Drag blocks here)");
-                        }
-
                         let mut move_request = None;
 
                         render::block_list(ui, &mut state.blocks, Vec::new(), &mut move_request);
