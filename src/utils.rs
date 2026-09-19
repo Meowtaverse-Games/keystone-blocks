@@ -1,4 +1,6 @@
-use keystone_lang::{Callee, Expr, Op, Statement, Type, UnaryOp};
+use keystone_lang::{Expr, Op, Statement, Type, TypeContext, expr_check};
+
+use crate::structs::InferResult;
 
 pub fn remove_statement_at_path(blocks: &mut Vec<Statement>, path: &[usize]) -> Option<Statement> {
     if path.is_empty() {
@@ -94,40 +96,40 @@ pub fn get_stmt_info(stmt: &Statement) -> (&'static str, &'static str) {
     }
 }
 
-pub fn infer_expr_type(expr: &Expr) -> Option<Type> {
-    match expr {
-        Expr::Uint(_) => Some(Type::Uint),
-        Expr::Float(_) => Some(Type::Float),
-        Expr::String(_) => Some(Type::String),
-        Expr::Boolean(_) => Some(Type::Boolean),
-        Expr::Direction(_) => Some(Type::Direction),
-        Expr::Unary { op, .. } => match op {
-            UnaryOp::Not => Some(Type::Boolean),
+pub fn infer_expr_type(expr: &Expr, ctx: &TypeContext) -> InferResult {
+    let mut temp_ctx = ctx.clone();
+
+    match expr_check(expr, &mut temp_ctx) {
+        Ok(t) => InferResult::Type(t),
+        Err(_) => match expr {
+            Expr::Binary { op, .. } => match op {
+                Op::Eq | Op::Neq | Op::Lt | Op::Gt | Op::Le | Op::Ge | Op::And | Op::Or => {
+                    InferResult::Type(Type::Boolean)
+                }
+                Op::Add | Op::Sub | Op::Mul | Op::Div => InferResult::Type(Type::Uint),
+            },
+            _ => InferResult::Unknown,
         },
-        Expr::Binary { op, .. } => match op {
-            Op::Eq | Op::Neq | Op::Lt | Op::Gt | Op::Le | Op::Ge | Op::And | Op::Or => {
-                Some(Type::Boolean)
-            }
-            Op::Add | Op::Sub | Op::Mul | Op::Div => None,
-        },
-        Expr::Call { callee, .. } => match callee {
-            Callee::IsTouched | Callee::IsEmpty => Some(Type::Boolean),
-            Callee::Rand => Some(Type::Uint),
-        },
-        Expr::Var(_) => None,
     }
 }
 
-pub fn is_type_compatible(expected: Option<Type>, incoming: &Expr) -> bool {
+pub fn is_type_compatible(expected: Option<Type>, incoming: &Expr, ctx: &TypeContext) -> bool {
     let expected_type = match expected {
         Some(t) => t,
         None => return true,
     };
 
-    let incoming_type = match infer_expr_type(incoming) {
-        Some(t) => t,
-        None => return true,
+    let infer = infer_expr_type(incoming, ctx);
+
+    let is_compat = match &infer {
+        InferResult::Type(t) => *t == expected_type,
+        InferResult::Unknown => true,
     };
 
-    expected_type == incoming_type
+    // println!(
+    //     "Expected: {:?}, Infer: {:?}, Result: {}",
+    //     expected_type, infer, is_compat
+    // );
+
+    is_compat
 }

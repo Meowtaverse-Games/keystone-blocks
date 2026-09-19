@@ -7,7 +7,7 @@ mod utils;
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui};
 use code::*;
-use keystone_lang::{Callee, Direction, Expr, Op, Statement};
+use keystone_lang::{Callee, Direction, Expr, Op, Statement, TypeContext};
 use renderer as render;
 use structs::*;
 use utils::*;
@@ -23,6 +23,8 @@ impl Plugin for VisualProgrammingPlugin {
 
 fn vpl_ui_system(mut contexts: EguiContexts, mut state: ResMut<VplState>) -> Result<(), BevyError> {
     let ctx = contexts.ctx_mut()?;
+    state.type_ctx = TypeContext::new();
+    let type_ctx = state.type_ctx.clone();
 
     egui::Window::new("Keystone VPL Studio")
         .default_size([750.0, 500.0])
@@ -121,6 +123,8 @@ fn vpl_ui_system(mut contexts: EguiContexts, mut state: ResMut<VplState>) -> Res
                         ui.add_space(10.0);
                         ui.label("——— Value Blocks (Expr) ———");
 
+                        ui.label(egui::RichText::new("Literals").weak().size(11.0));
+                        render::expr_palette_button(ui, "Boolean (true)", Expr::Boolean(true));
                         render::expr_palette_button(ui, "Number (0)", Expr::Uint(0));
                         render::expr_palette_button(ui, "Float (0.0)", Expr::Float(0.0));
                         render::expr_palette_button(
@@ -133,24 +137,17 @@ fn vpl_ui_system(mut contexts: EguiContexts, mut state: ResMut<VplState>) -> Res
                             "Direction (Forward)",
                             Expr::Direction(Direction::Forward),
                         );
-                        render::expr_palette_button(
-                            ui,
-                            "rand()",
-                            Expr::Call {
-                                callee: Callee::Rand,
-                                args: vec![],
-                            },
-                        );
+
+                        ui.add_space(8.0);
+
+                        ui.label(egui::RichText::new("Variables").weak().size(11.0));
+
                         render::expr_palette_button(ui, "Variable (x)", Expr::Var("x".to_string()));
-                        render::expr_palette_button(
-                            ui,
-                            "Comparison (a == b)",
-                            Expr::Binary {
-                                op: Op::Eq,
-                                lhs: Box::new(Expr::Var("x".to_string())),
-                                rhs: Box::new(Expr::Uint(0)),
-                            },
-                        );
+
+                        ui.add_space(8.0);
+
+                        ui.label(egui::RichText::new("Operators").weak().size(11.0));
+
                         render::expr_palette_button(
                             ui,
                             "Math (a + b)",
@@ -160,6 +157,40 @@ fn vpl_ui_system(mut contexts: EguiContexts, mut state: ResMut<VplState>) -> Res
                                 rhs: Box::new(Expr::Uint(1)),
                             },
                         );
+
+                        render::expr_palette_button(
+                            ui,
+                            "Comparison (a == b)",
+                            Expr::Binary {
+                                op: Op::Eq,
+                                lhs: Box::new(Expr::Var("x".to_string())),
+                                rhs: Box::new(Expr::Uint(0)),
+                            },
+                        );
+
+                        render::expr_palette_button(
+                            ui,
+                            "Logic (a and b)",
+                            Expr::Binary {
+                                op: Op::And,
+                                lhs: Box::new(Expr::Boolean(true)),
+                                rhs: Box::new(Expr::Boolean(true)),
+                            },
+                        );
+
+                        ui.add_space(8.0);
+
+                        ui.label(egui::RichText::new("Functions").weak().size(11.0));
+
+                        render::expr_palette_button(
+                            ui,
+                            "rand()",
+                            Expr::Call {
+                                callee: Callee::Rand,
+                                args: vec![],
+                            },
+                        );
+
                         render::expr_palette_button(
                             ui,
                             "is_touched()",
@@ -168,6 +199,7 @@ fn vpl_ui_system(mut contexts: EguiContexts, mut state: ResMut<VplState>) -> Res
                                 args: vec![],
                             },
                         );
+
                         render::expr_palette_button(
                             ui,
                             "is_empty(dir)",
@@ -192,7 +224,13 @@ fn vpl_ui_system(mut contexts: EguiContexts, mut state: ResMut<VplState>) -> Res
                     .show(ui_right, |ui| {
                         let mut move_request = None;
 
-                        render::block_list(ui, &mut state.blocks, Vec::new(), &mut move_request);
+                        render::block_list(
+                            ui,
+                            &mut state.blocks,
+                            Vec::new(),
+                            &mut move_request,
+                            &type_ctx,
+                        );
 
                         if let Some(req) = move_request {
                             if let Some(moved_block) =
