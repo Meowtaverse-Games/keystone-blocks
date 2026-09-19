@@ -37,4 +37,5 @@ impl Default for VplState {
 pub enum InferResult {
     Type(Type),
     Unknown,
+    Invalid,
 }

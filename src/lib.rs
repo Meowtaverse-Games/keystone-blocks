@@ -7,7 +7,7 @@ mod utils;
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui};
 use code::*;
-use keystone_lang::{Callee, Direction, Expr, Op, Statement, TypeContext};
+use keystone_lang::{Callee, Direction, Expr, Op, Statement, TypeContext, UnaryOp};
 use renderer as render;
 use structs::*;
 use utils::*;
@@ -175,6 +175,15 @@ fn vpl_ui_system(mut contexts: EguiContexts, mut state: ResMut<VplState>) -> Res
                                 op: Op::And,
                                 lhs: Box::new(Expr::Boolean(true)),
                                 rhs: Box::new(Expr::Boolean(true)),
+                            },
+                        );
+
+                        render::expr_palette_button(
+                            ui,
+                            "not (a)",
+                            Expr::Unary {
+                                op: UnaryOp::Not,
+                                exp: Box::new(Expr::Boolean(true)),
                             },
                         );
 

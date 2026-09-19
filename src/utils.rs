@@ -108,6 +108,12 @@ pub fn infer_expr_type(expr: &Expr, ctx: &TypeContext) -> InferResult {
                 }
                 Op::Add | Op::Sub | Op::Mul | Op::Div => InferResult::Type(Type::Uint),
             },
+            Expr::Unary { exp, .. } => match infer_expr_type(exp, ctx) {
+                InferResult::Type(Type::Boolean) => InferResult::Type(Type::Boolean),
+                InferResult::Type(_) => InferResult::Invalid,
+                InferResult::Unknown => InferResult::Type(Type::Boolean),
+                InferResult::Invalid => InferResult::Invalid,
+            },
             _ => InferResult::Unknown,
         },
     }
@@ -124,6 +130,7 @@ pub fn is_type_compatible(expected: Option<Type>, incoming: &Expr, ctx: &TypeCon
     let is_compat = match &infer {
         InferResult::Type(t) => *t == expected_type,
         InferResult::Unknown => true,
+        InferResult::Invalid => false,
     };
 
     // println!(
