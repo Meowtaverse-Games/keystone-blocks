@@ -1,4 +1,4 @@
-use keystone_lang::{Expr, Op, Statement, Type, TypeContext, expr_check};
+use keystone_lang::{Callee, Expr, Op, Statement, Type, TypeContext, expr_check};
 
 use crate::structs::InferResult;
 
@@ -113,6 +113,14 @@ pub fn infer_expr_type(expr: &Expr, ctx: &TypeContext) -> InferResult {
                 InferResult::Type(_) => InferResult::Invalid,
                 InferResult::Unknown => InferResult::Type(Type::Boolean),
                 InferResult::Invalid => InferResult::Invalid,
+            },
+            Expr::Call {
+                callee: Callee::Rand,
+                args,
+            } => match args.len() {
+                0 => InferResult::Type(Type::Float),
+                1 | 2 => InferResult::Type(Type::Uint),
+                _ => InferResult::Invalid,
             },
             _ => InferResult::Unknown,
         },

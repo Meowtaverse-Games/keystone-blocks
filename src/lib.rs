@@ -202,6 +202,24 @@ fn vpl_ui_system(mut contexts: EguiContexts, mut state: ResMut<VplState>) -> Res
 
                         render::expr_palette_button(
                             ui,
+                            "rand(n)",
+                            Expr::Call {
+                                callee: Callee::Rand,
+                                args: vec![Box::new(Expr::Uint(10))],
+                            },
+                        );
+
+                        render::expr_palette_button(
+                            ui,
+                            "rand(a, b)",
+                            Expr::Call {
+                                callee: Callee::Rand,
+                                args: vec![Box::new(Expr::Uint(1)), Box::new(Expr::Uint(10))],
+                            },
+                        );
+
+                        render::expr_palette_button(
+                            ui,
                             "is_touched()",
                             Expr::Call {
                                 callee: Callee::IsTouched,

@@ -587,14 +587,35 @@ pub fn expr_slot(
                         Callee::IsEmpty => "is_empty",
                         Callee::Rand => "rand",
                     };
-                    unselectable_label(
-                        ui,
-                        egui::RichText::new(format!("{}()", name)).color(colors::TEXT_WHITE),
-                    );
+
+                    unselectable_label(ui, egui::RichText::new(name).color(colors::TEXT_WHITE));
+
+                    unselectable_label(ui, egui::RichText::new("(").color(colors::TEXT_WHITE));
+
+                    let arg_expected_type = match callee {
+                        Callee::IsTouched => None,
+                        Callee::IsEmpty => Some(Type::Direction),
+                        Callee::Rand => Some(Type::Uint),
+                    };
 
                     for (idx, arg) in args.iter_mut().enumerate() {
-                        expr_slot(ui, arg, slot_id.with(idx), None, type_ctx);
+                        if idx > 0 {
+                            unselectable_label(
+                                ui,
+                                egui::RichText::new(", ").color(colors::TEXT_WHITE),
+                            );
+                        }
+
+                        expr_slot(
+                            ui,
+                            arg,
+                            slot_id.with(idx),
+                            arg_expected_type.clone(),
+                            type_ctx,
+                        );
                     }
+
+                    unselectable_label(ui, egui::RichText::new(")").color(colors::TEXT_WHITE));
                 }
             });
         });
