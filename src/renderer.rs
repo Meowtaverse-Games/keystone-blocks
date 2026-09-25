@@ -80,314 +80,292 @@ pub fn block_list(
         ui.scope(|ui| {
             ui.visuals_mut().widgets.active.bg_fill = egui::Color32::TRANSPARENT;
             ui.visuals_mut().widgets.inactive.bg_fill = egui::Color32::TRANSPARENT;
-            ui.visuals_mut().widgets.active.bg_stroke = egui::Stroke::NONE;
+            ui.visuals_mut().widgets.active.bg_stroke = egui::Stroke::new(1.0, colors::TEXT_WHITE);
+
             let (_, dropped_payload) =
                 ui.dnd_drop_zone::<DraggedBlock, _>(egui::Frame::NONE, |ui| {
                     get_block_frame(block_color).show(ui, |ui| {
                         ui.vertical(|ui| {
-                            ui.horizontal(|ui| {
-                                let (icon, name) = get_stmt_info(&current_blocks[idx]);
+                            render_statement_header(
+                                ui,
+                                &mut current_blocks[idx],
+                                &this_path,
+                                block_id,
+                                &mut delete_target_idx,
+                                idx,
+                                type_ctx,
+                            );
 
-                                ui.dnd_drag_source(
-                                    block_id.with("drag_handle"),
-                                    DraggedBlock::MoveStatement {
-                                        path: this_path.clone(),
-                                    },
-                                    |ui| {
-                                        ui.horizontal(|ui| {
-                                            unselectable_label(
-                                                ui,
-                                                egui::RichText::new("☰")
-                                                    .color(colors::TEXT_WHITE)
-                                                    .size(13.0),
-                                            )
-                                            .on_hover_cursor(egui::CursorIcon::Grab);
-
-                                            unselectable_label(
-                                                ui,
-                                                egui::RichText::new(format!("{} {}", icon, name))
-                                                    .color(colors::TEXT_WHITE)
-                                                    .strong(),
-                                            )
-                                            .on_hover_cursor(egui::CursorIcon::Grab);
-                                        });
-                                    },
-                                );
-
-                                ui.add_space(2.0);
-
-                                match &mut current_blocks[idx] {
-                                    Statement::Print(expr) => {
-                                        expr_slot(
-                                            ui,
-                                            expr,
-                                            block_id.with("print_expr"),
-                                            None,
-                                            type_ctx,
-                                        );
-                                    }
-                                    Statement::Sleep(expr) => {
-                                        expr_slot(
-                                            ui,
-                                            expr,
-                                            block_id.with("sleep_expr"),
-                                            Some(Type::Float),
-                                            type_ctx,
-                                        );
-                                        unselectable_label(
-                                            ui,
-                                            egui::RichText::new("sec").color(colors::TEXT_WHITE),
-                                        );
-                                    }
-                                    Statement::Move(expr) => {
-                                        expr_slot(
-                                            ui,
-                                            expr,
-                                            block_id.with("move_expr"),
-                                            Some(Type::Direction),
-                                            type_ctx,
-                                        );
-                                    }
-                                    Statement::Turn(expr) => {
-                                        expr_slot(
-                                            ui,
-                                            expr,
-                                            block_id.with("turn_expr"),
-                                            Some(Type::Direction),
-                                            type_ctx,
-                                        );
-                                    }
-                                    Statement::Dig(expr) => {
-                                        expr_slot(
-                                            ui,
-                                            expr,
-                                            block_id.with("dig_expr"),
-                                            Some(Type::Direction),
-                                            type_ctx,
-                                        );
-                                    }
-                                    Statement::Let(name, expr) => {
-                                        egui::Frame::NONE
-                                            .inner_margin(egui::Margin::symmetric(5, 2))
-                                            .corner_radius(egui::CornerRadius::same(8))
-                                            .fill(colors::SLOT_BG)
-                                            .stroke(egui::Stroke::new(1.0, colors::SLOT_BORDER))
-                                            .show(ui, |ui| {
-                                                ui.add(
-                                                    egui::TextEdit::singleline(name)
-                                                        .frame(false)
-                                                        .desired_width(50.0)
-                                                        .margin(egui::Margin::symmetric(4, 1)),
-                                                );
-                                            });
-                                        unselectable_label(
-                                            ui,
-                                            egui::RichText::new("=")
-                                                .color(colors::TEXT_WHITE)
-                                                .strong(),
-                                        );
-                                        expr_slot(
-                                            ui,
-                                            expr,
-                                            block_id.with("let_expr"),
-                                            None,
-                                            type_ctx,
-                                        );
-                                    }
-                                    Statement::Send(expr) => {
-                                        expr_slot(
-                                            ui,
-                                            expr,
-                                            block_id.with("send_expr"),
-                                            None,
-                                            type_ctx,
-                                        );
-                                    }
-                                    Statement::Receive(expr) => {
-                                        expr_slot(
-                                            ui,
-                                            expr,
-                                            block_id.with("receive_expr"),
-                                            None,
-                                            type_ctx,
-                                        );
-                                    }
-                                    _ => {}
-                                }
-
-                                if ui
-                                    .add(
-                                        egui::Button::new(
-                                            egui::RichText::new("✖")
-                                                .color(egui::Color32::LIGHT_RED),
-                                        )
-                                        .frame(false),
-                                    )
-                                    .clicked()
-                                {
-                                    delete_target_idx = Some(idx);
-                                }
-                            });
-
-                            match &mut current_blocks[idx] {
-                                Statement::If(cond, body) => {
-                                    ui.horizontal(|ui| {
-                                        unselectable_label(
-                                            ui,
-                                            egui::RichText::new("if")
-                                                .color(colors::TEXT_WHITE)
-                                                .strong(),
-                                        );
-                                        expr_slot(
-                                            ui,
-                                            cond,
-                                            block_id.with("if_cond"),
-                                            Some(Type::Boolean),
-                                            type_ctx,
-                                        );
-                                    });
-
-                                    egui::CollapsingHeader::new(
-                                        egui::RichText::new("body").color(colors::TEXT_WHITE),
-                                    )
-                                    .id_salt(&current_id_str)
-                                    .default_open(true)
-                                    .show(ui, |ui| {
-                                        egui::Frame::new()
-                                            .fill(egui::Color32::from_black_alpha(100))
-                                            .corner_radius(egui::CornerRadius::same(6))
-                                            .inner_margin(egui::Margin::same(8))
-                                            .stroke(egui::Stroke::new(
-                                                1.0,
-                                                egui::Color32::from_white_alpha(20),
-                                            ))
-                                            .show(ui, |ui| {
-                                                block_list(
-                                                    ui,
-                                                    body,
-                                                    this_path.clone(),
-                                                    move_request,
-                                                    type_ctx,
-                                                );
-                                            });
-                                    });
-                                }
-                                Statement::Loop(expr, body) => {
-                                    ui.horizontal(|ui| {
-                                        unselectable_label(
-                                            ui,
-                                            egui::RichText::new("🔁 loop")
-                                                .color(colors::TEXT_WHITE)
-                                                .strong(),
-                                        );
-                                        expr_slot(
-                                            ui,
-                                            expr,
-                                            block_id.with("loop_count"),
-                                            Some(Type::Uint),
-                                            type_ctx,
-                                        );
-                                        unselectable_label(
-                                            ui,
-                                            egui::RichText::new("times").color(colors::TEXT_WHITE),
-                                        );
-                                    });
-
-                                    egui::CollapsingHeader::new(
-                                        egui::RichText::new("body").color(colors::TEXT_WHITE),
-                                    )
-                                    .id_salt(&current_id_str)
-                                    .default_open(true)
-                                    .show(ui, |ui| {
-                                        egui::Frame::new()
-                                            .fill(egui::Color32::from_black_alpha(100))
-                                            .corner_radius(egui::CornerRadius::same(6))
-                                            .inner_margin(egui::Margin::same(8))
-                                            .stroke(egui::Stroke::new(
-                                                1.0,
-                                                egui::Color32::from_white_alpha(20),
-                                            ))
-                                            .show(ui, |ui| {
-                                                block_list(
-                                                    ui,
-                                                    body,
-                                                    this_path.clone(),
-                                                    move_request,
-                                                    type_ctx,
-                                                );
-                                            });
-                                    });
-                                }
-                                Statement::While(cond, body) => {
-                                    ui.horizontal(|ui| {
-                                        unselectable_label(
-                                            ui,
-                                            egui::RichText::new("while")
-                                                .color(colors::TEXT_WHITE)
-                                                .strong(),
-                                        );
-                                        expr_slot(
-                                            ui,
-                                            cond,
-                                            block_id.with("while_cond"),
-                                            Some(Type::Boolean),
-                                            type_ctx,
-                                        );
-                                    });
-
-                                    egui::CollapsingHeader::new(
-                                        egui::RichText::new("body").color(colors::TEXT_WHITE),
-                                    )
-                                    .id_salt(&current_id_str)
-                                    .default_open(true)
-                                    .show(ui, |ui| {
-                                        egui::Frame::new()
-                                            .fill(egui::Color32::from_black_alpha(100))
-                                            .corner_radius(egui::CornerRadius::same(6))
-                                            .inner_margin(egui::Margin::same(8))
-                                            .stroke(egui::Stroke::new(
-                                                1.0,
-                                                egui::Color32::from_white_alpha(20),
-                                            ))
-                                            .show(ui, |ui| {
-                                                block_list(
-                                                    ui,
-                                                    body,
-                                                    this_path.clone(),
-                                                    move_request,
-                                                    type_ctx,
-                                                );
-                                            });
-                                    });
-                                }
-                                _ => {}
-                            }
+                            render_statement_body(
+                                ui,
+                                &mut current_blocks[idx],
+                                &this_path,
+                                &current_id_str,
+                                block_id,
+                                move_request,
+                                type_ctx,
+                            );
                         });
                     });
                 });
 
             if let Some(payload) = dropped_payload {
-                match payload.as_ref() {
-                    DraggedBlock::NewStatement(new_stmt) => {
-                        current_blocks.insert(idx, new_stmt.clone());
-                        return;
-                    }
-                    DraggedBlock::MoveStatement { path: src_path } => {
-                        if !is_ancestor(src_path, &current_path) {
-                            *move_request = Some(MoveRequest {
-                                src_path: src_path.clone(),
-                                target_path: current_path.clone(),
-                                insert_idx: idx,
-                            });
-                        }
-                    }
-                    _ => {}
-                }
+                handle_drop(
+                    payload.as_ref(),
+                    current_blocks,
+                    &current_path,
+                    idx,
+                    move_request,
+                );
             }
+
             ui.add_space(4.0);
         });
     }
 
+    render_bottom_drop_zone(ui, current_blocks, &current_path, move_request);
+
+    if let Some(idx) = delete_target_idx {
+        current_blocks.remove(idx);
+    }
+}
+
+fn render_statement_header(
+    ui: &mut egui::Ui,
+    stmt: &mut Statement,
+    this_path: &[usize],
+    block_id: egui::Id,
+    delete_target_idx: &mut Option<usize>,
+    idx: usize,
+    type_ctx: &TypeContext,
+) {
+    ui.horizontal(|ui| {
+        let (icon, name) = get_stmt_info(stmt);
+
+        ui.dnd_drag_source(
+            block_id.with("drag_handle"),
+            DraggedBlock::MoveStatement {
+                path: this_path.to_vec(),
+            },
+            |ui| {
+                ui.horizontal(|ui| {
+                    unselectable_label(
+                        ui,
+                        egui::RichText::new("☰")
+                            .color(colors::TEXT_WHITE)
+                            .size(13.0),
+                    )
+                    .on_hover_cursor(egui::CursorIcon::Grab);
+
+                    unselectable_label(
+                        ui,
+                        egui::RichText::new(format!("{} {}", icon, name))
+                            .color(colors::TEXT_WHITE)
+                            .strong(),
+                    )
+                    .on_hover_cursor(egui::CursorIcon::Grab);
+                });
+            },
+        );
+
+        ui.add_space(2.0);
+
+        match stmt {
+            Statement::Print(expr) => {
+                expr_slot(ui, expr, block_id.with("print_expr"), None, type_ctx);
+            }
+            Statement::Sleep(expr) => {
+                expr_slot(
+                    ui,
+                    expr,
+                    block_id.with("sleep_expr"),
+                    Some(Type::Float),
+                    type_ctx,
+                );
+                unselectable_label(ui, egui::RichText::new("sec").color(colors::TEXT_WHITE));
+            }
+            Statement::Move(expr) => {
+                expr_slot(
+                    ui,
+                    expr,
+                    block_id.with("move_expr"),
+                    Some(Type::Direction),
+                    type_ctx,
+                );
+            }
+            Statement::Turn(expr) => {
+                expr_slot(
+                    ui,
+                    expr,
+                    block_id.with("turn_expr"),
+                    Some(Type::Direction),
+                    type_ctx,
+                );
+            }
+            Statement::Dig(expr) => {
+                expr_slot(
+                    ui,
+                    expr,
+                    block_id.with("dig_expr"),
+                    Some(Type::Direction),
+                    type_ctx,
+                );
+            }
+            Statement::Let(name, expr) => {
+                egui::Frame::NONE
+                    .inner_margin(egui::Margin::symmetric(5, 2))
+                    .corner_radius(egui::CornerRadius::same(8))
+                    .fill(colors::SLOT_BG)
+                    .stroke(egui::Stroke::new(1.0, colors::SLOT_BORDER))
+                    .show(ui, |ui| {
+                        ui.add(
+                            egui::TextEdit::singleline(name)
+                                .frame(false)
+                                .desired_width(50.0)
+                                .margin(egui::Margin::symmetric(4, 1)),
+                        );
+                    });
+                unselectable_label(
+                    ui,
+                    egui::RichText::new("=").color(colors::TEXT_WHITE).strong(),
+                );
+                expr_slot(ui, expr, block_id.with("let_expr"), None, type_ctx);
+            }
+            Statement::Send(expr) => {
+                expr_slot(ui, expr, block_id.with("send_expr"), None, type_ctx);
+            }
+            Statement::Receive(expr) => {
+                expr_slot(ui, expr, block_id.with("receive_expr"), None, type_ctx);
+            }
+            _ => {}
+        }
+
+        if ui
+            .add(egui::Button::new(egui::RichText::new("✖").color(egui::Color32::RED)).frame(false))
+            .clicked()
+        {
+            *delete_target_idx = Some(idx);
+        }
+    });
+}
+
+fn render_statement_body(
+    ui: &mut egui::Ui,
+    stmt: &mut Statement,
+    this_path: &[usize],
+    current_id_str: &str,
+    block_id: egui::Id,
+    move_request: &mut Option<MoveRequest>,
+    type_ctx: &TypeContext,
+) {
+    match stmt {
+        Statement::If(cond, body) => {
+            ui.horizontal(|ui| {
+                unselectable_label(
+                    ui,
+                    egui::RichText::new("if").color(colors::TEXT_WHITE).strong(),
+                );
+                expr_slot(
+                    ui,
+                    cond,
+                    block_id.with("if_cond"),
+                    Some(Type::Boolean),
+                    type_ctx,
+                );
+            });
+            render_collapsing_body(
+                ui,
+                body,
+                this_path.to_vec(),
+                current_id_str,
+                move_request,
+                type_ctx,
+            );
+        }
+        Statement::Loop(expr, body) => {
+            ui.horizontal(|ui| {
+                unselectable_label(
+                    ui,
+                    egui::RichText::new("🔁 loop")
+                        .color(colors::TEXT_WHITE)
+                        .strong(),
+                );
+                expr_slot(
+                    ui,
+                    expr,
+                    block_id.with("loop_count"),
+                    Some(Type::Uint),
+                    type_ctx,
+                );
+                unselectable_label(ui, egui::RichText::new("times").color(colors::TEXT_WHITE));
+            });
+            render_collapsing_body(
+                ui,
+                body,
+                this_path.to_vec(),
+                current_id_str,
+                move_request,
+                type_ctx,
+            );
+        }
+        Statement::While(cond, body) => {
+            ui.horizontal(|ui| {
+                unselectable_label(
+                    ui,
+                    egui::RichText::new("while")
+                        .color(colors::TEXT_WHITE)
+                        .strong(),
+                );
+                expr_slot(
+                    ui,
+                    cond,
+                    block_id.with("while_cond"),
+                    Some(Type::Boolean),
+                    type_ctx,
+                );
+            });
+            render_collapsing_body(
+                ui,
+                body,
+                this_path.to_vec(),
+                current_id_str,
+                move_request,
+                type_ctx,
+            );
+        }
+        _ => {}
+    }
+}
+
+fn render_collapsing_body(
+    ui: &mut egui::Ui,
+    body: &mut Vec<Statement>,
+    this_path: Vec<usize>,
+    current_id_str: &str,
+    move_request: &mut Option<MoveRequest>,
+    type_ctx: &TypeContext,
+) {
+    egui::CollapsingHeader::new(egui::RichText::new("body").color(colors::TEXT_WHITE))
+        .id_salt(current_id_str)
+        .default_open(true)
+        .show(ui, |ui| {
+            egui::Frame::new()
+                .fill(egui::Color32::from_black_alpha(100))
+                .corner_radius(egui::CornerRadius::same(6))
+                .inner_margin(egui::Margin::same(8))
+                .stroke(egui::Stroke::new(1.0, egui::Color32::from_white_alpha(20)))
+                .show(ui, |ui| {
+                    block_list(ui, body, this_path, move_request, type_ctx);
+                });
+        });
+}
+
+fn render_bottom_drop_zone(
+    ui: &mut egui::Ui,
+    current_blocks: &mut Vec<Statement>,
+    current_path: &[usize],
+    move_request: &mut Option<MoveRequest>,
+) {
     ui.scope(|ui| {
         ui.visuals_mut().widgets.active.bg_fill = egui::Color32::from_white_alpha(50);
         ui.visuals_mut().widgets.inactive.bg_fill = egui::Color32::TRANSPARENT;
@@ -408,26 +386,40 @@ pub fn block_list(
         );
 
         if let Some(payload) = bottom_payload {
-            match payload.as_ref() {
-                DraggedBlock::NewStatement(new_stmt) => {
-                    current_blocks.push(new_stmt.clone());
-                }
-                DraggedBlock::MoveStatement { path: src_path } => {
-                    if !is_ancestor(src_path, &current_path) {
-                        *move_request = Some(MoveRequest {
-                            src_path: src_path.clone(),
-                            target_path: current_path.clone(),
-                            insert_idx: current_blocks.len(),
-                        });
-                    }
-                }
-                _ => {}
-            }
+            handle_drop(
+                payload.as_ref(),
+                current_blocks,
+                current_path,
+                current_blocks.len(),
+                move_request,
+            );
         }
     });
+}
 
-    if let Some(idx) = delete_target_idx {
-        current_blocks.remove(idx);
+fn handle_drop(
+    payload: &DraggedBlock,
+    current_blocks: &mut Vec<Statement>,
+    current_path: &[usize],
+    insert_idx: usize,
+    move_request: &mut Option<MoveRequest>,
+) {
+    match payload {
+        DraggedBlock::NewStatement(new_stmt) => {
+            if insert_idx <= current_blocks.len() {
+                current_blocks.insert(insert_idx, new_stmt.clone());
+            }
+        }
+        DraggedBlock::MoveStatement { path: src_path } => {
+            if !is_ancestor(src_path, current_path) {
+                *move_request = Some(MoveRequest {
+                    src_path: src_path.clone(),
+                    target_path: current_path.to_vec(),
+                    insert_idx,
+                });
+            }
+        }
+        _ => {}
     }
 }
 
@@ -504,6 +496,7 @@ pub fn expr_slot(
     ui.scope(|ui| {
         ui.visuals_mut().widgets.active.bg_fill = colors::SLOT_BG;
         ui.visuals_mut().widgets.inactive.bg_fill = colors::SLOT_BG;
+        ui.visuals_mut().widgets.active.bg_stroke = egui::Stroke::new(1.0, colors::TEXT_WHITE);
 
         let (_, dropped_payload) = ui.dnd_drop_zone::<DraggedBlock, _>(frame, |ui| {
             ui.horizontal(|ui| match expr {
