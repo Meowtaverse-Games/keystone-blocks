@@ -5,7 +5,6 @@ use keystone_lang::{Expr, Statement, Type, TypeContext};
 pub enum DraggedBlock {
     NewStatement(Statement),
     MoveStatement { path: Vec<usize> },
-
     NewExpr(Expr),
 }
 

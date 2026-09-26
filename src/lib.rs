@@ -5,7 +5,10 @@ mod renderer;
 mod structs;
 mod utils;
 use bevy::prelude::*;
-use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui};
+use bevy_egui::{
+    EguiContexts, EguiPlugin, EguiPrimaryContextPass,
+    egui::{self, Color32},
+};
 use code::*;
 use keystone_lang::{Callee, Direction, Expr, Op, Statement, TypeContext, UnaryOp};
 use renderer as render;
@@ -48,194 +51,215 @@ fn render_palette_panel(ui: &mut egui::Ui, blocks: &mut Vec<Statement>) {
     ui.heading("➕ Add Blocks");
     ui.separator();
 
-    egui::ScrollArea::vertical()
-        .id_salt("left_palette_scroll")
-        .show(ui, |ui| {
-            render::palette_button(
-                ui,
-                "🏃 Move (Direction)",
-                Statement::Move(Expr::Direction(Direction::Forward)),
-                blocks,
-            );
-            render::palette_button(
-                ui,
-                "🔄 Turn (Direction)",
-                Statement::Turn(Expr::Direction(Direction::Right)),
-                blocks,
-            );
-            render::palette_button(
-                ui,
-                "🔨 Dig (Direction)",
-                Statement::Dig(Expr::Direction(Direction::Up)),
-                blocks,
-            );
-            render::palette_button(
-                ui,
-                "💬 Print (String)",
-                Statement::Print(Expr::String("hello".to_string())),
-                blocks,
-            );
-            render::palette_button(
-                ui,
-                "💤 Sleep (Float)",
-                Statement::Sleep(Expr::Float(1.0)),
-                blocks,
-            );
+    ui.scope(|ui| {
+        ui.visuals_mut().widgets.active.bg_fill = Color32::TRANSPARENT;
+        ui.visuals_mut().widgets.inactive.bg_fill = Color32::TRANSPARENT;
+        ui.visuals_mut().widgets.active.bg_stroke = egui::Stroke::NONE;
+        ui.visuals_mut().widgets.inactive.bg_stroke = egui::Stroke::NONE;
 
-            ui.add_space(10.0);
-            ui.label("——— Variables & Events ———");
+        let (_, dropped) = ui.dnd_drop_zone::<DraggedBlock, _>(
+            egui::Frame::NONE.fill(egui::Color32::TRANSPARENT),
+            |ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt("left_palette_scroll")
+                    .show(ui, |ui| {
+                        render::palette_button(
+                            ui,
+                            "🏃 Move (Direction)",
+                            Statement::Move(Expr::Direction(Direction::Forward)),
+                            blocks,
+                        );
+                        render::palette_button(
+                            ui,
+                            "🔄 Turn (Direction)",
+                            Statement::Turn(Expr::Direction(Direction::Right)),
+                            blocks,
+                        );
+                        render::palette_button(
+                            ui,
+                            "🔨 Dig (Direction)",
+                            Statement::Dig(Expr::Direction(Direction::Up)),
+                            blocks,
+                        );
+                        render::palette_button(
+                            ui,
+                            "💬 Print (String)",
+                            Statement::Print(Expr::String("hello".to_string())),
+                            blocks,
+                        );
+                        render::palette_button(
+                            ui,
+                            "💤 Sleep (Float)",
+                            Statement::Sleep(Expr::Float(1.0)),
+                            blocks,
+                        );
 
-            render::palette_button(
-                ui,
-                "📝 Let (Variable)",
-                Statement::Let("x".to_string(), Expr::Uint(1)),
-                blocks,
-            );
-            render::palette_button(
-                ui,
-                "📡 Send (Event)",
-                Statement::Send(Expr::String("signal".to_string())),
-                blocks,
-            );
-            render::palette_button(
-                ui,
-                "📥 Receive (Wait)",
-                Statement::Receive(Expr::String("signal".to_string())),
-                blocks,
-            );
+                        ui.add_space(10.0);
+                        ui.label("——— Variables & Events ———");
 
-            ui.add_space(10.0);
-            ui.label("——— Nest Blocks ———");
+                        render::palette_button(
+                            ui,
+                            "📝 Let (Variable)",
+                            Statement::Let("x".to_string(), Expr::Uint(1)),
+                            blocks,
+                        );
+                        render::palette_button(
+                            ui,
+                            "📡 Send (Event)",
+                            Statement::Send(Expr::String("signal".to_string())),
+                            blocks,
+                        );
+                        render::palette_button(
+                            ui,
+                            "📥 Receive (Wait)",
+                            Statement::Receive(Expr::String("signal".to_string())),
+                            blocks,
+                        );
 
-            render::palette_button(
-                ui,
-                "❓ If (is_touched())",
-                Statement::If(
-                    Expr::Call {
-                        callee: keystone_lang::Callee::IsTouched,
-                        args: vec![],
-                    },
-                    Vec::new(),
-                ),
-                blocks,
-            );
-            render::palette_button(
-                ui,
-                "🔁 Loop (Count)",
-                Statement::Loop(Expr::Uint(3), Vec::new()),
-                blocks,
-            );
-            render::palette_button(
-                ui,
-                "🔄 While (true)",
-                Statement::While(Expr::Boolean(true), Vec::new()),
-                blocks,
-            );
+                        ui.add_space(10.0);
+                        ui.label("——— Nest Blocks ———");
 
-            ui.add_space(10.0);
-            ui.label("——— Value Blocks (Expr) ———");
+                        render::palette_button(
+                            ui,
+                            "❓ If (is_touched())",
+                            Statement::If(
+                                Expr::Call {
+                                    callee: keystone_lang::Callee::IsTouched,
+                                    args: vec![],
+                                },
+                                Vec::new(),
+                            ),
+                            blocks,
+                        );
+                        render::palette_button(
+                            ui,
+                            "🔁 Loop (Count)",
+                            Statement::Loop(Expr::Uint(3), Vec::new()),
+                            blocks,
+                        );
+                        render::palette_button(
+                            ui,
+                            "🔄 While (true)",
+                            Statement::While(Expr::Boolean(true), Vec::new()),
+                            blocks,
+                        );
 
-            ui.label(egui::RichText::new("Literals").weak().size(11.0));
-            render::expr_palette_button(ui, "Boolean (true)", Expr::Boolean(true));
-            render::expr_palette_button(ui, "Number (0)", Expr::Uint(0));
-            render::expr_palette_button(ui, "Float (0.0)", Expr::Float(0.0));
-            render::expr_palette_button(ui, "Text (\"hello\")", Expr::String("hello".to_string()));
-            render::expr_palette_button(
-                ui,
-                "Direction (Forward)",
-                Expr::Direction(Direction::Forward),
-            );
+                        ui.add_space(10.0);
+                        ui.label("——— Value Blocks (Expr) ———");
 
-            ui.add_space(8.0);
-            ui.label(egui::RichText::new("Variables").weak().size(11.0));
-            render::expr_palette_button(ui, "Variable (x)", Expr::Var("x".to_string()));
+                        ui.label(egui::RichText::new("Literals").weak().size(11.0));
+                        render::expr_palette_button(ui, "Boolean (true)", Expr::Boolean(true));
+                        render::expr_palette_button(ui, "Number (0)", Expr::Uint(0));
+                        render::expr_palette_button(ui, "Float (0.0)", Expr::Float(0.0));
+                        render::expr_palette_button(
+                            ui,
+                            "Text (\"hello\")",
+                            Expr::String("hello".to_string()),
+                        );
+                        render::expr_palette_button(
+                            ui,
+                            "Direction (Forward)",
+                            Expr::Direction(Direction::Forward),
+                        );
 
-            ui.add_space(8.0);
-            ui.label(egui::RichText::new("Operators").weak().size(11.0));
-            render::expr_palette_button(
-                ui,
-                "Math (a + b)",
-                Expr::Binary {
-                    op: Op::Add,
-                    lhs: Box::new(Expr::Var("x".to_string())),
-                    rhs: Box::new(Expr::Uint(1)),
-                },
-            );
-            render::expr_palette_button(
-                ui,
-                "Comparison (a == b)",
-                Expr::Binary {
-                    op: Op::Eq,
-                    lhs: Box::new(Expr::Var("x".to_string())),
-                    rhs: Box::new(Expr::Uint(0)),
-                },
-            );
-            render::expr_palette_button(
-                ui,
-                "Logic (a and b)",
-                Expr::Binary {
-                    op: Op::And,
-                    lhs: Box::new(Expr::Boolean(true)),
-                    rhs: Box::new(Expr::Boolean(true)),
-                },
-            );
-            render::expr_palette_button(
-                ui,
-                "not (a)",
-                Expr::Unary {
-                    op: UnaryOp::Not,
-                    exp: Box::new(Expr::Boolean(true)),
-                },
-            );
+                        ui.add_space(8.0);
+                        ui.label(egui::RichText::new("Variables").weak().size(11.0));
+                        render::expr_palette_button(ui, "Variable (x)", Expr::Var("x".to_string()));
 
-            ui.add_space(8.0);
-            ui.label(egui::RichText::new("Functions").weak().size(11.0));
-            render::expr_palette_button(
-                ui,
-                "rand()",
-                Expr::Call {
-                    callee: Callee::Rand,
-                    args: vec![],
-                },
-            );
-            render::expr_palette_button(
-                ui,
-                "rand(n)",
-                Expr::Call {
-                    callee: Callee::Rand,
-                    args: vec![Box::new(Expr::Uint(10))],
-                },
-            );
-            render::expr_palette_button(
-                ui,
-                "rand(a, b)",
-                Expr::Call {
-                    callee: Callee::Rand,
-                    args: vec![Box::new(Expr::Uint(1)), Box::new(Expr::Uint(10))],
-                },
-            );
-            render::expr_palette_button(
-                ui,
-                "is_touched()",
-                Expr::Call {
-                    callee: Callee::IsTouched,
-                    args: vec![],
-                },
-            );
-            render::expr_palette_button(
-                ui,
-                "is_empty(dir)",
-                Expr::Call {
-                    callee: Callee::IsEmpty,
-                    args: vec![Box::new(Expr::Direction(Direction::Forward))],
-                },
-            );
+                        ui.add_space(8.0);
+                        ui.label(egui::RichText::new("Operators").weak().size(11.0));
+                        render::expr_palette_button(
+                            ui,
+                            "Math (a + b)",
+                            Expr::Binary {
+                                op: Op::Add,
+                                lhs: Box::new(Expr::Var("x".to_string())),
+                                rhs: Box::new(Expr::Uint(1)),
+                            },
+                        );
+                        render::expr_palette_button(
+                            ui,
+                            "Comparison (a == b)",
+                            Expr::Binary {
+                                op: Op::Eq,
+                                lhs: Box::new(Expr::Var("x".to_string())),
+                                rhs: Box::new(Expr::Uint(0)),
+                            },
+                        );
+                        render::expr_palette_button(
+                            ui,
+                            "Logic (a and b)",
+                            Expr::Binary {
+                                op: Op::And,
+                                lhs: Box::new(Expr::Boolean(true)),
+                                rhs: Box::new(Expr::Boolean(true)),
+                            },
+                        );
+                        render::expr_palette_button(
+                            ui,
+                            "not (a)",
+                            Expr::Unary {
+                                op: UnaryOp::Not,
+                                exp: Box::new(Expr::Boolean(true)),
+                            },
+                        );
 
-            ui.add_space(20.0);
-            if ui.button("🗑️ CLEAR ALL").clicked() {
-                blocks.clear();
+                        ui.add_space(8.0);
+                        ui.label(egui::RichText::new("Functions").weak().size(11.0));
+                        render::expr_palette_button(
+                            ui,
+                            "rand()",
+                            Expr::Call {
+                                callee: Callee::Rand,
+                                args: vec![],
+                            },
+                        );
+                        render::expr_palette_button(
+                            ui,
+                            "rand(n)",
+                            Expr::Call {
+                                callee: Callee::Rand,
+                                args: vec![Box::new(Expr::Uint(10))],
+                            },
+                        );
+                        render::expr_palette_button(
+                            ui,
+                            "rand(a, b)",
+                            Expr::Call {
+                                callee: Callee::Rand,
+                                args: vec![Box::new(Expr::Uint(1)), Box::new(Expr::Uint(10))],
+                            },
+                        );
+                        render::expr_palette_button(
+                            ui,
+                            "is_touched()",
+                            Expr::Call {
+                                callee: Callee::IsTouched,
+                                args: vec![],
+                            },
+                        );
+                        render::expr_palette_button(
+                            ui,
+                            "is_empty(dir)",
+                            Expr::Call {
+                                callee: Callee::IsEmpty,
+                                args: vec![Box::new(Expr::Direction(Direction::Forward))],
+                            },
+                        );
+
+                        ui.add_space(20.0);
+                        if ui.button("🗑️ CLEAR ALL").clicked() {
+                            blocks.clear();
+                        }
+                    });
+            },
+        );
+        if let Some(payload) = dropped {
+            if let DraggedBlock::MoveStatement { path } = payload.as_ref() {
+                remove_statement_at_path(blocks, path);
             }
-        });
+        }
+    });
 }
 
 fn render_program_panel(ui: &mut egui::Ui, blocks: &mut Vec<Statement>, type_ctx: &TypeContext) {
