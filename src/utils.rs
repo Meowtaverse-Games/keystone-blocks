@@ -62,24 +62,6 @@ pub fn is_ancestor(ancestor_path: &[usize], target_path: &[usize]) -> bool {
     target_path.starts_with(ancestor_path)
 }
 
-pub fn adjust_path_after_removal(target_path: &[usize], removed_path: &[usize]) -> Vec<usize> {
-    let mut adjusted = target_path.to_vec();
-
-    let common_len = target_path
-        .iter()
-        .zip(removed_path.iter())
-        .take_while(|(a, b)| a == b)
-        .count();
-
-    if common_len < removed_path.len() && common_len < target_path.len() {
-        if removed_path[common_len] < target_path[common_len] {
-            adjusted[common_len] -= 1;
-        }
-    }
-
-    adjusted
-}
-
 pub fn get_stmt_info(stmt: &Statement) -> (&'static str, &'static str) {
     match stmt {
         Statement::Move(_) => ("🏃", "Move"),

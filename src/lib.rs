@@ -263,21 +263,40 @@ fn vpl_ui_system(mut contexts: EguiContexts, mut state: ResMut<VplState>) -> Res
                             if let Some(moved_block) =
                                 remove_statement_at_path(&mut state.blocks, &req.src_path)
                             {
-                                let adjusted_target_path =
-                                    adjust_path_after_removal(&req.target_path, &req.src_path);
+                                let mut target_path = req.target_path;
+                                let mut insert_idx = req.insert_idx;
 
-                                let mut adjusted_idx = req.insert_idx;
-                                if req.src_path.len() == req.target_path.len() + 1
-                                    && req.src_path.starts_with(&req.target_path)
-                                    && req.src_path.last().copied() < Some(req.insert_idx)
+                                if req.src_path.len() == target_path.len() + 1
+                                    && req.src_path.starts_with(&target_path)
                                 {
-                                    adjusted_idx = adjusted_idx.saturating_sub(1);
+                                    let src_idx = *req.src_path.last().unwrap();
+                                    if src_idx < insert_idx {
+                                        insert_idx = insert_idx.saturating_sub(1);
+                                    }
+                                } else {
+                                    let src_depth = req.src_path.len();
+
+                                    for i in 0..target_path.len().min(src_depth) {
+                                        if req.src_path[..i] == target_path[..i] {
+                                            let src_idx = req.src_path[i];
+                                            let target_idx = target_path[i];
+
+                                            if i == src_depth - 1 {
+                                                if src_idx < target_idx {
+                                                    target_path[i] -= 1;
+                                                }
+                                                break;
+                                            } else if src_idx != target_idx {
+                                                break;
+                                            }
+                                        }
+                                    }
                                 }
 
                                 insert_statement_at_path(
                                     &mut state.blocks,
-                                    &adjusted_target_path,
-                                    adjusted_idx,
+                                    &target_path,
+                                    insert_idx,
                                     moved_block,
                                 );
                             }

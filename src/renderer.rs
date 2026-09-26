@@ -110,13 +110,15 @@ pub fn block_list(
                 });
 
             if let Some(payload) = dropped_payload {
-                handle_drop(
-                    payload.as_ref(),
-                    current_blocks,
-                    &current_path,
-                    idx,
-                    move_request,
-                );
+                if move_request.is_none() {
+                    handle_drop(
+                        payload.as_ref(),
+                        current_blocks,
+                        &current_path,
+                        idx,
+                        move_request,
+                    );
+                }
             }
 
             ui.add_space(4.0);
@@ -386,13 +388,15 @@ fn render_bottom_drop_zone(
         );
 
         if let Some(payload) = bottom_payload {
-            handle_drop(
-                payload.as_ref(),
-                current_blocks,
-                current_path,
-                current_blocks.len(),
-                move_request,
-            );
+            if move_request.is_none() {
+                handle_drop(
+                    payload.as_ref(),
+                    current_blocks,
+                    current_path,
+                    current_blocks.len(),
+                    move_request,
+                );
+            }
         }
     });
 }
