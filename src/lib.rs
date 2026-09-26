@@ -30,279 +30,10 @@ fn vpl_ui_system(mut contexts: EguiContexts, mut state: ResMut<VplState>) -> Res
         .default_size([750.0, 500.0])
         .show(ctx, |ui| {
             ui.columns(2, |columns| {
-                let ui_left = &mut columns[0];
-                ui_left.heading("➕ Add Blocks");
-                ui_left.separator();
-
-                egui::ScrollArea::vertical()
-                    .id_salt("left_palette_scroll")
-                    .show(ui_left, |ui| {
-                        render::palette_button(
-                            ui,
-                            "🏃 Move (Direction)",
-                            Statement::Move(Expr::Direction(Direction::Forward)),
-                            &mut state.blocks,
-                        );
-                        render::palette_button(
-                            ui,
-                            "🔄 Turn (Direction)",
-                            Statement::Turn(Expr::Direction(Direction::Right)),
-                            &mut state.blocks,
-                        );
-                        render::palette_button(
-                            ui,
-                            "🔨 Dig (Direction)",
-                            Statement::Dig(Expr::Direction(Direction::Up)),
-                            &mut state.blocks,
-                        );
-                        render::palette_button(
-                            ui,
-                            "💬 Print (String)",
-                            Statement::Print(Expr::String("hello".to_string())),
-                            &mut state.blocks,
-                        );
-                        render::palette_button(
-                            ui,
-                            "💤 Sleep (Float)",
-                            Statement::Sleep(Expr::Float(1.0)),
-                            &mut state.blocks,
-                        );
-
-                        ui.add_space(10.0);
-                        ui.label("——— Variables & Events ———");
-
-                        render::palette_button(
-                            ui,
-                            "📝 Let (Variable)",
-                            Statement::Let("x".to_string(), Expr::Uint(1)),
-                            &mut state.blocks,
-                        );
-
-                        render::palette_button(
-                            ui,
-                            "📡 Send (Event)",
-                            Statement::Send(Expr::String("signal".to_string())),
-                            &mut state.blocks,
-                        );
-
-                        render::palette_button(
-                            ui,
-                            "📥 Receive (Wait)",
-                            Statement::Receive(Expr::String("signal".to_string())),
-                            &mut state.blocks,
-                        );
-
-                        ui.add_space(10.0);
-                        ui.label("——— Nest Blocks ———");
-
-                        render::palette_button(
-                            ui,
-                            "❓ If (is_touched())",
-                            Statement::If(
-                                Expr::Call {
-                                    callee: keystone_lang::Callee::IsTouched,
-                                    args: vec![],
-                                },
-                                Vec::new(),
-                            ),
-                            &mut state.blocks,
-                        );
-                        render::palette_button(
-                            ui,
-                            "🔁 Loop (Count)",
-                            Statement::Loop(Expr::Uint(3), Vec::new()),
-                            &mut state.blocks,
-                        );
-                        render::palette_button(
-                            ui,
-                            "🔄 While (true)",
-                            Statement::While(Expr::Boolean(true), Vec::new()),
-                            &mut state.blocks,
-                        );
-
-                        ui.add_space(10.0);
-                        ui.label("——— Value Blocks (Expr) ———");
-
-                        ui.label(egui::RichText::new("Literals").weak().size(11.0));
-                        render::expr_palette_button(ui, "Boolean (true)", Expr::Boolean(true));
-                        render::expr_palette_button(ui, "Number (0)", Expr::Uint(0));
-                        render::expr_palette_button(ui, "Float (0.0)", Expr::Float(0.0));
-                        render::expr_palette_button(
-                            ui,
-                            "Text (\"hello\")",
-                            Expr::String("hello".to_string()),
-                        );
-                        render::expr_palette_button(
-                            ui,
-                            "Direction (Forward)",
-                            Expr::Direction(Direction::Forward),
-                        );
-
-                        ui.add_space(8.0);
-
-                        ui.label(egui::RichText::new("Variables").weak().size(11.0));
-
-                        render::expr_palette_button(ui, "Variable (x)", Expr::Var("x".to_string()));
-
-                        ui.add_space(8.0);
-
-                        ui.label(egui::RichText::new("Operators").weak().size(11.0));
-
-                        render::expr_palette_button(
-                            ui,
-                            "Math (a + b)",
-                            Expr::Binary {
-                                op: Op::Add,
-                                lhs: Box::new(Expr::Var("x".to_string())),
-                                rhs: Box::new(Expr::Uint(1)),
-                            },
-                        );
-
-                        render::expr_palette_button(
-                            ui,
-                            "Comparison (a == b)",
-                            Expr::Binary {
-                                op: Op::Eq,
-                                lhs: Box::new(Expr::Var("x".to_string())),
-                                rhs: Box::new(Expr::Uint(0)),
-                            },
-                        );
-
-                        render::expr_palette_button(
-                            ui,
-                            "Logic (a and b)",
-                            Expr::Binary {
-                                op: Op::And,
-                                lhs: Box::new(Expr::Boolean(true)),
-                                rhs: Box::new(Expr::Boolean(true)),
-                            },
-                        );
-
-                        render::expr_palette_button(
-                            ui,
-                            "not (a)",
-                            Expr::Unary {
-                                op: UnaryOp::Not,
-                                exp: Box::new(Expr::Boolean(true)),
-                            },
-                        );
-
-                        ui.add_space(8.0);
-
-                        ui.label(egui::RichText::new("Functions").weak().size(11.0));
-
-                        render::expr_palette_button(
-                            ui,
-                            "rand()",
-                            Expr::Call {
-                                callee: Callee::Rand,
-                                args: vec![],
-                            },
-                        );
-
-                        render::expr_palette_button(
-                            ui,
-                            "rand(n)",
-                            Expr::Call {
-                                callee: Callee::Rand,
-                                args: vec![Box::new(Expr::Uint(10))],
-                            },
-                        );
-
-                        render::expr_palette_button(
-                            ui,
-                            "rand(a, b)",
-                            Expr::Call {
-                                callee: Callee::Rand,
-                                args: vec![Box::new(Expr::Uint(1)), Box::new(Expr::Uint(10))],
-                            },
-                        );
-
-                        render::expr_palette_button(
-                            ui,
-                            "is_touched()",
-                            Expr::Call {
-                                callee: Callee::IsTouched,
-                                args: vec![],
-                            },
-                        );
-
-                        render::expr_palette_button(
-                            ui,
-                            "is_empty(dir)",
-                            Expr::Call {
-                                callee: Callee::IsEmpty,
-                                args: vec![Box::new(Expr::Direction(Direction::Forward))],
-                            },
-                        );
-
-                        ui.add_space(20.0);
-                        if ui.button("🗑️ CLEAR ALL").clicked() {
-                            state.blocks.clear();
-                        }
-                    });
-
-                let ui_right = &mut columns[1];
-                ui_right.heading("📝 Current Program");
-                ui_right.separator();
-
-                egui::ScrollArea::vertical()
-                    .id_salt("right_program_scroll")
-                    .show(ui_right, |ui| {
-                        let mut move_request = None;
-
-                        render::block_list(
-                            ui,
-                            &mut state.blocks,
-                            Vec::new(),
-                            &mut move_request,
-                            &type_ctx,
-                        );
-
-                        if let Some(req) = move_request {
-                            if let Some(moved_block) =
-                                remove_statement_at_path(&mut state.blocks, &req.src_path)
-                            {
-                                let mut target_path = req.target_path;
-                                let mut insert_idx = req.insert_idx;
-
-                                if req.src_path.len() == target_path.len() + 1
-                                    && req.src_path.starts_with(&target_path)
-                                {
-                                    let src_idx = *req.src_path.last().unwrap();
-                                    if src_idx < insert_idx {
-                                        insert_idx = insert_idx.saturating_sub(1);
-                                    }
-                                } else {
-                                    let src_depth = req.src_path.len();
-
-                                    for i in 0..target_path.len().min(src_depth) {
-                                        if req.src_path[..i] == target_path[..i] {
-                                            let src_idx = req.src_path[i];
-                                            let target_idx = target_path[i];
-
-                                            if i == src_depth - 1 {
-                                                if src_idx < target_idx {
-                                                    target_path[i] -= 1;
-                                                }
-                                                break;
-                                            } else if src_idx != target_idx {
-                                                break;
-                                            }
-                                        }
-                                    }
-                                }
-
-                                insert_statement_at_path(
-                                    &mut state.blocks,
-                                    &target_path,
-                                    insert_idx,
-                                    moved_block,
-                                );
-                            }
-                        }
-                    });
+                render_palette_panel(&mut columns[0], &mut state.blocks);
+                render_program_panel(&mut columns[1], &mut state.blocks, &type_ctx);
             });
+
             ui.separator();
 
             state.generated_code = statements_to_string(&state.blocks, 0);
@@ -311,4 +42,248 @@ fn vpl_ui_system(mut contexts: EguiContexts, mut state: ResMut<VplState>) -> Res
         });
 
     Ok(())
+}
+
+fn render_palette_panel(ui: &mut egui::Ui, blocks: &mut Vec<Statement>) {
+    ui.heading("➕ Add Blocks");
+    ui.separator();
+
+    egui::ScrollArea::vertical()
+        .id_salt("left_palette_scroll")
+        .show(ui, |ui| {
+            render::palette_button(
+                ui,
+                "🏃 Move (Direction)",
+                Statement::Move(Expr::Direction(Direction::Forward)),
+                blocks,
+            );
+            render::palette_button(
+                ui,
+                "🔄 Turn (Direction)",
+                Statement::Turn(Expr::Direction(Direction::Right)),
+                blocks,
+            );
+            render::palette_button(
+                ui,
+                "🔨 Dig (Direction)",
+                Statement::Dig(Expr::Direction(Direction::Up)),
+                blocks,
+            );
+            render::palette_button(
+                ui,
+                "💬 Print (String)",
+                Statement::Print(Expr::String("hello".to_string())),
+                blocks,
+            );
+            render::palette_button(
+                ui,
+                "💤 Sleep (Float)",
+                Statement::Sleep(Expr::Float(1.0)),
+                blocks,
+            );
+
+            ui.add_space(10.0);
+            ui.label("——— Variables & Events ———");
+
+            render::palette_button(
+                ui,
+                "📝 Let (Variable)",
+                Statement::Let("x".to_string(), Expr::Uint(1)),
+                blocks,
+            );
+            render::palette_button(
+                ui,
+                "📡 Send (Event)",
+                Statement::Send(Expr::String("signal".to_string())),
+                blocks,
+            );
+            render::palette_button(
+                ui,
+                "📥 Receive (Wait)",
+                Statement::Receive(Expr::String("signal".to_string())),
+                blocks,
+            );
+
+            ui.add_space(10.0);
+            ui.label("——— Nest Blocks ———");
+
+            render::palette_button(
+                ui,
+                "❓ If (is_touched())",
+                Statement::If(
+                    Expr::Call {
+                        callee: keystone_lang::Callee::IsTouched,
+                        args: vec![],
+                    },
+                    Vec::new(),
+                ),
+                blocks,
+            );
+            render::palette_button(
+                ui,
+                "🔁 Loop (Count)",
+                Statement::Loop(Expr::Uint(3), Vec::new()),
+                blocks,
+            );
+            render::palette_button(
+                ui,
+                "🔄 While (true)",
+                Statement::While(Expr::Boolean(true), Vec::new()),
+                blocks,
+            );
+
+            ui.add_space(10.0);
+            ui.label("——— Value Blocks (Expr) ———");
+
+            ui.label(egui::RichText::new("Literals").weak().size(11.0));
+            render::expr_palette_button(ui, "Boolean (true)", Expr::Boolean(true));
+            render::expr_palette_button(ui, "Number (0)", Expr::Uint(0));
+            render::expr_palette_button(ui, "Float (0.0)", Expr::Float(0.0));
+            render::expr_palette_button(ui, "Text (\"hello\")", Expr::String("hello".to_string()));
+            render::expr_palette_button(
+                ui,
+                "Direction (Forward)",
+                Expr::Direction(Direction::Forward),
+            );
+
+            ui.add_space(8.0);
+            ui.label(egui::RichText::new("Variables").weak().size(11.0));
+            render::expr_palette_button(ui, "Variable (x)", Expr::Var("x".to_string()));
+
+            ui.add_space(8.0);
+            ui.label(egui::RichText::new("Operators").weak().size(11.0));
+            render::expr_palette_button(
+                ui,
+                "Math (a + b)",
+                Expr::Binary {
+                    op: Op::Add,
+                    lhs: Box::new(Expr::Var("x".to_string())),
+                    rhs: Box::new(Expr::Uint(1)),
+                },
+            );
+            render::expr_palette_button(
+                ui,
+                "Comparison (a == b)",
+                Expr::Binary {
+                    op: Op::Eq,
+                    lhs: Box::new(Expr::Var("x".to_string())),
+                    rhs: Box::new(Expr::Uint(0)),
+                },
+            );
+            render::expr_palette_button(
+                ui,
+                "Logic (a and b)",
+                Expr::Binary {
+                    op: Op::And,
+                    lhs: Box::new(Expr::Boolean(true)),
+                    rhs: Box::new(Expr::Boolean(true)),
+                },
+            );
+            render::expr_palette_button(
+                ui,
+                "not (a)",
+                Expr::Unary {
+                    op: UnaryOp::Not,
+                    exp: Box::new(Expr::Boolean(true)),
+                },
+            );
+
+            ui.add_space(8.0);
+            ui.label(egui::RichText::new("Functions").weak().size(11.0));
+            render::expr_palette_button(
+                ui,
+                "rand()",
+                Expr::Call {
+                    callee: Callee::Rand,
+                    args: vec![],
+                },
+            );
+            render::expr_palette_button(
+                ui,
+                "rand(n)",
+                Expr::Call {
+                    callee: Callee::Rand,
+                    args: vec![Box::new(Expr::Uint(10))],
+                },
+            );
+            render::expr_palette_button(
+                ui,
+                "rand(a, b)",
+                Expr::Call {
+                    callee: Callee::Rand,
+                    args: vec![Box::new(Expr::Uint(1)), Box::new(Expr::Uint(10))],
+                },
+            );
+            render::expr_palette_button(
+                ui,
+                "is_touched()",
+                Expr::Call {
+                    callee: Callee::IsTouched,
+                    args: vec![],
+                },
+            );
+            render::expr_palette_button(
+                ui,
+                "is_empty(dir)",
+                Expr::Call {
+                    callee: Callee::IsEmpty,
+                    args: vec![Box::new(Expr::Direction(Direction::Forward))],
+                },
+            );
+
+            ui.add_space(20.0);
+            if ui.button("🗑️ CLEAR ALL").clicked() {
+                blocks.clear();
+            }
+        });
+}
+
+fn render_program_panel(ui: &mut egui::Ui, blocks: &mut Vec<Statement>, type_ctx: &TypeContext) {
+    ui.heading("📝 Current Program");
+    ui.separator();
+
+    egui::ScrollArea::vertical()
+        .id_salt("right_program_scroll")
+        .show(ui, |ui| {
+            let mut move_request = None;
+
+            render::block_list(ui, blocks, Vec::new(), &mut move_request, type_ctx);
+
+            if let Some(req) = move_request {
+                handle_move_request(blocks, req);
+            }
+        });
+}
+
+fn handle_move_request(blocks: &mut Vec<Statement>, req: MoveRequest) {
+    if let Some(moved_block) = remove_statement_at_path(blocks, &req.src_path) {
+        let mut target_path = req.target_path;
+        let mut insert_idx = req.insert_idx;
+
+        if req.src_path.len() == target_path.len() + 1 && req.src_path.starts_with(&target_path) {
+            let src_idx = *req.src_path.last().unwrap();
+            if src_idx < insert_idx {
+                insert_idx = insert_idx.saturating_sub(1);
+            }
+        } else {
+            let src_depth = req.src_path.len();
+            for i in 0..target_path.len().min(src_depth) {
+                if req.src_path[..i] == target_path[..i] {
+                    let src_idx = req.src_path[i];
+                    let target_idx = target_path[i];
+
+                    if i == src_depth - 1 {
+                        if src_idx < target_idx {
+                            target_path[i] -= 1;
+                        }
+                        break;
+                    } else if src_idx != target_idx {
+                        break;
+                    }
+                }
+            }
+        }
+
+        insert_statement_at_path(blocks, &target_path, insert_idx, moved_block);
+    }
 }
