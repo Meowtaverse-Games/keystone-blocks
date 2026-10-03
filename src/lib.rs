@@ -25,6 +25,10 @@ impl Plugin for VisualProgrammingPlugin {
 }
 
 fn vpl_ui_system(mut contexts: EguiContexts, mut state: ResMut<VplState>) -> Result<(), BevyError> {
+    if !state.is_visible {
+        return Ok(());
+    }
+
     let ctx = contexts.ctx_mut()?;
     state.type_ctx = TypeContext::new();
     let type_ctx = state.type_ctx.clone();

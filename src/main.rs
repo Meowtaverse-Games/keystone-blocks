@@ -23,13 +23,17 @@ fn main() {
         .add_plugins(DefaultPlugins)
         .add_plugins(bevy_egui::EguiPlugin::default())
         .add_plugins(VisualProgrammingPlugin)
-        .add_systems(Startup, setup_camera_system)
+        .add_systems(Startup, (setup_camera_system, setup_vpl_test_env_system))
         .add_systems(Update, test_code_generation_and_compile_system)
         .run();
 }
 
 fn setup_camera_system(mut commands: Commands) {
     commands.spawn(Camera2d);
+}
+
+fn setup_vpl_test_env_system(mut vpl_state: ResMut<VplState>) {
+    vpl_state.is_visible = true;
 }
 
 fn test_code_generation_and_compile_system(

@@ -20,6 +20,7 @@ pub struct VplState {
     pub blocks: Vec<Statement>,
     pub type_ctx: TypeContext,
     pub generated_code: String,
+    pub is_visible: bool,
 }
 
 impl Default for VplState {
@@ -28,6 +29,7 @@ impl Default for VplState {
             blocks: Vec::new(),
             type_ctx: TypeContext::new(),
             generated_code: String::new(),
+            is_visible: false,
         }
     }
 }
