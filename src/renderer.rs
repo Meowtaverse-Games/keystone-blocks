@@ -231,7 +231,7 @@ fn render_statement_header(
                     .show(ui, |ui| {
                         ui.add(
                             egui::TextEdit::singleline(name)
-                                .frame(false)
+                                .frame(egui::Frame::NONE)
                                 .desired_width(50.0)
                                 .margin(egui::Margin::symmetric(4, 1)),
                         );
@@ -516,7 +516,7 @@ pub fn expr_slot(
                 Expr::Var(name) => {
                     ui.add(
                         egui::TextEdit::singleline(name)
-                            .frame(false)
+                            .frame(egui::Frame::NONE)
                             .desired_width(50.0)
                             .margin(egui::Margin::symmetric(4, 1)),
                     );
@@ -536,7 +536,7 @@ pub fn expr_slot(
                 Expr::String(s) => {
                     ui.add(
                         egui::TextEdit::singleline(s)
-                            .frame(false)
+                            .frame(egui::Frame::NONE)
                             .desired_width(80.0)
                             .margin(egui::Margin::symmetric(4, 1)),
                     );
