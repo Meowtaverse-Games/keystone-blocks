@@ -6,7 +6,7 @@ mod structs;
 mod utils;
 use bevy::prelude::*;
 use bevy_egui::{
-    EguiContexts, EguiPlugin, EguiPrimaryContextPass,
+    EguiContexts, EguiPrimaryContextPass,
     egui::{self, Color32},
 };
 use code::*;
@@ -19,8 +19,7 @@ use utils::*;
 pub struct VisualProgrammingPlugin;
 impl Plugin for VisualProgrammingPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(EguiPlugin::default())
-            .init_resource::<VplState>()
+        app.init_resource::<VplState>()
             .add_systems(EguiPrimaryContextPass, vpl_ui_system);
     }
 }

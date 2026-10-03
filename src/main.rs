@@ -21,6 +21,7 @@ impl ExternalApi for DummyApi {
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
+        .add_plugins(bevy_egui::EguiPlugin::default())
         .add_plugins(VisualProgrammingPlugin)
         .add_systems(Startup, setup_camera_system)
         .add_systems(Update, test_code_generation_and_compile_system)
