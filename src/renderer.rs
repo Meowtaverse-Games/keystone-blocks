@@ -213,6 +213,15 @@ fn render_statement_header(
                     type_ctx,
                 );
             }
+            Statement::Place(expr) => {
+                expr_slot(
+                    ui,
+                    expr,
+                    block_id.with("place_expr"),
+                    Some(Type::Direction),
+                    type_ctx,
+                );
+            }
             Statement::Let(name, expr) => {
                 egui::Frame::NONE
                     .inner_margin(egui::Margin::symmetric(5, 2))

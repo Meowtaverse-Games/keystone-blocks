@@ -73,6 +73,7 @@ pub fn statements_to_string(statements: &[Statement], indent_level: usize) -> St
             Statement::Move(e) => code.push_str(&format!("{}move {}\n", indent, e.to_code())),
             Statement::Turn(e) => code.push_str(&format!("{}turn {}\n", indent, e.to_code())),
             Statement::Dig(e) => code.push_str(&format!("{}dig {}\n", indent, e.to_code())),
+            Statement::Place(e) => code.push_str(&format!("{}place {}\n", indent, e.to_code())),
             Statement::Let(name, e) => {
                 code.push_str(&format!("{}{} = {}\n", indent, name, e.to_code()))
             }

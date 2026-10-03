@@ -67,6 +67,7 @@ pub fn get_stmt_info(stmt: &Statement) -> (&'static str, &'static str) {
         Statement::Move(_) => ("🏃", "Move"),
         Statement::Turn(_) => ("🔄", "Turn"),
         Statement::Dig(_) => ("🔨", "Dig"),
+        Statement::Place(_) => ("✒️", "Place"),
         Statement::Print(_) => ("💬", "Print"),
         Statement::Sleep(_) => ("💤", "Sleep"),
         Statement::Let(_, _) => ("📝", "Let"),

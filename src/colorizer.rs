@@ -18,7 +18,9 @@ pub mod colors {
 
 pub fn get_stmt_color(stmt: &Statement) -> egui::Color32 {
     match stmt {
-        Statement::Move(_) | Statement::Turn(_) | Statement::Dig(_) => colors::MOTION,
+        Statement::Move(_) | Statement::Turn(_) | Statement::Dig(_) | Statement::Place(_) => {
+            colors::MOTION
+        }
         Statement::Print(_) => colors::LOOKS,
         Statement::Sleep(_)
         | Statement::If(_, _)

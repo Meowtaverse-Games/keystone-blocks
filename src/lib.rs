@@ -12,6 +12,7 @@ use bevy_egui::{
 use code::*;
 use keystone_lang::{Callee, Direction, Expr, Op, Statement, TypeContext, UnaryOp};
 use renderer as render;
+pub use structs::VplState;
 use structs::*;
 use utils::*;
 
@@ -36,16 +37,22 @@ fn vpl_ui_system(mut contexts: EguiContexts, mut state: ResMut<VplState>) -> Res
                 render_palette_panel(&mut columns[0], &mut state.blocks);
                 render_program_panel(&mut columns[1], &mut state.blocks, &type_ctx);
             });
-
-            ui.separator();
-
-            state.generated_code = statements_to_string(&state.blocks, 0);
-            ui.heading("GENERATED CODE");
-            ui.code(&state.generated_code);
         });
 
     Ok(())
 }
+
+pub fn generate_code_from_state(state: &VplState) -> String {
+    statements_to_string(&state.blocks, 0)
+}
+
+// pub fn generate(state: ) {
+//     ui.separator();
+//
+//     state.generated_code = statements_to_string(&state.blocks, 0);
+//     ui.heading("GENERATED CODE");
+//     ui.code(&state.generated_code);
+// }
 
 fn render_palette_panel(ui: &mut egui::Ui, blocks: &mut Vec<Statement>) {
     ui.heading("➕ Add Blocks");
@@ -66,19 +73,25 @@ fn render_palette_panel(ui: &mut egui::Ui, blocks: &mut Vec<Statement>) {
                         render::palette_button(
                             ui,
                             "🏃 Move (Direction)",
-                            Statement::Move(Expr::Direction(Direction::Forward)),
+                            Statement::Move(Expr::Direction(Direction::Right)),
                             blocks,
                         );
                         render::palette_button(
                             ui,
                             "🔄 Turn (Direction)",
-                            Statement::Turn(Expr::Direction(Direction::Right)),
+                            Statement::Turn(Expr::Direction(Direction::Left)),
                             blocks,
                         );
                         render::palette_button(
                             ui,
                             "🔨 Dig (Direction)",
                             Statement::Dig(Expr::Direction(Direction::Up)),
+                            blocks,
+                        );
+                        render::palette_button(
+                            ui,
+                            "🔨 Place (Direction)",
+                            Statement::Place(Expr::Direction(Direction::Down)),
                             blocks,
                         );
                         render::palette_button(
@@ -247,10 +260,10 @@ fn render_palette_panel(ui: &mut egui::Ui, blocks: &mut Vec<Statement>) {
                             },
                         );
 
-                        ui.add_space(20.0);
-                        if ui.button("🗑️ CLEAR ALL").clicked() {
-                            blocks.clear();
-                        }
+                        // ui.add_space(20.0);
+                        // if ui.button("🗑️ CLEAR ALL").clicked() {
+                        //     blocks.clear();
+                        // }
                     });
             },
         );
