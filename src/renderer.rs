@@ -25,7 +25,7 @@ pub fn palette_button(
     label: &str,
     stmt: Statement,
     target_blocks: &mut Vec<Statement>,
-) {
+) -> f32 {
     let color = get_stmt_color(&stmt);
     let item_id = egui::Id::new(format!("palette_{:?}", stmt));
 
@@ -53,6 +53,8 @@ pub fn palette_button(
     if response.response.clicked() {
         target_blocks.push(stmt);
     }
+
+    response.response.rect.width()
 }
 
 pub fn block_list(
@@ -109,16 +111,16 @@ pub fn block_list(
                     });
                 });
 
-            if let Some(payload) = dropped_payload {
-                if move_request.is_none() {
-                    handle_drop(
-                        payload.as_ref(),
-                        current_blocks,
-                        &current_path,
-                        idx,
-                        move_request,
-                    );
-                }
+            if let Some(payload) = dropped_payload
+                && move_request.is_none()
+            {
+                handle_drop(
+                    payload.as_ref(),
+                    current_blocks,
+                    &current_path,
+                    idx,
+                    move_request,
+                );
             }
 
             ui.add_space(4.0);
@@ -396,16 +398,16 @@ fn render_bottom_drop_zone(
             },
         );
 
-        if let Some(payload) = bottom_payload {
-            if move_request.is_none() {
-                handle_drop(
-                    payload.as_ref(),
-                    current_blocks,
-                    current_path,
-                    current_blocks.len(),
-                    move_request,
-                );
-            }
+        if let Some(payload) = bottom_payload
+            && move_request.is_none()
+        {
+            handle_drop(
+                payload.as_ref(),
+                current_blocks,
+                current_path,
+                current_blocks.len(),
+                move_request,
+            );
         }
     });
 }
@@ -418,19 +420,15 @@ fn handle_drop(
     move_request: &mut Option<MoveRequest>,
 ) {
     match payload {
-        DraggedBlock::NewStatement(new_stmt) => {
-            if insert_idx <= current_blocks.len() {
-                current_blocks.insert(insert_idx, new_stmt.clone());
-            }
+        DraggedBlock::NewStatement(new_stmt) if insert_idx <= current_blocks.len() => {
+            current_blocks.insert(insert_idx, new_stmt.clone());
         }
-        DraggedBlock::MoveStatement { path: src_path } => {
-            if !is_ancestor(src_path, current_path) {
-                *move_request = Some(MoveRequest {
-                    src_path: src_path.clone(),
-                    target_path: current_path.to_vec(),
-                    insert_idx,
-                });
-            }
+        DraggedBlock::MoveStatement { path: src_path } if !is_ancestor(src_path, current_path) => {
+            *move_request = Some(MoveRequest {
+                src_path: src_path.clone(),
+                target_path: current_path.to_vec(),
+                insert_idx,
+            });
         }
         _ => {}
     }
@@ -626,20 +624,19 @@ pub fn expr_slot(
             });
         });
 
-        if let Some(payload) = dropped_payload {
-            if let DraggedBlock::NewExpr(new_expr) = payload.as_ref() {
-                if is_type_compatible(expected_type, new_expr, type_ctx) {
-                    *expr = new_expr.clone();
-                }
-            }
+        if let Some(payload) = dropped_payload
+            && let DraggedBlock::NewExpr(new_expr) = payload.as_ref()
+            && is_type_compatible(expected_type, new_expr, type_ctx)
+        {
+            *expr = new_expr.clone();
         }
     });
 }
 
-pub fn expr_palette_button(ui: &mut egui::Ui, label: &str, expr: Expr) {
+pub fn expr_palette_button(ui: &mut egui::Ui, label: &str, expr: Expr) -> f32 {
     let item_id = egui::Id::new(format!("expr_palette_{}", label));
 
-    ui.dnd_drag_source(item_id, DraggedBlock::NewExpr(expr.clone()), |ui| {
+    let response = ui.dnd_drag_source(item_id, DraggedBlock::NewExpr(expr.clone()), |ui| {
         egui::Frame::NONE
             .fill(colors::OPERATORS)
             .corner_radius(egui::CornerRadius::same(12))
@@ -663,4 +660,6 @@ pub fn expr_palette_button(ui: &mut egui::Ui, label: &str, expr: Expr) {
                 });
             });
     });
+
+    response.response.rect.width()
 }

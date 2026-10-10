@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use bevy_egui::{EguiContexts, EguiPrimaryContextPass, egui};
 use keystone_blocks::{VisualProgrammingPlugin, VplState};
 use keystone_lang::{Direction, ExternalApi, eval};
 use std::sync::Arc;
@@ -25,6 +26,7 @@ fn main() {
         .add_plugins(VisualProgrammingPlugin)
         .add_systems(Startup, (setup_camera_system, setup_vpl_test_env_system))
         .add_systems(Update, test_code_generation_and_compile_system)
+        .add_systems(EguiPrimaryContextPass, vpl_panel_system)
         .run();
 }
 
@@ -34,6 +36,21 @@ fn setup_camera_system(mut commands: Commands) {
 
 fn setup_vpl_test_env_system(mut vpl_state: ResMut<VplState>) {
     vpl_state.is_visible = true;
+}
+
+fn vpl_panel_system(mut contexts: EguiContexts, mut vpl_state: ResMut<VplState>) -> Result {
+    if !vpl_state.is_visible {
+        return Ok(());
+    }
+    let ctx = contexts.ctx_mut()?;
+    let rect = ctx.content_rect();
+    egui::Area::new(egui::Id::new("vpl-demo"))
+        .fixed_pos(rect.left_top())
+        .show(ctx, |ui| {
+            ui.set_min_size(rect.size());
+            keystone_blocks::show_vpl_contents(ui, &mut vpl_state);
+        });
+    Ok(())
 }
 
 fn test_code_generation_and_compile_system(
