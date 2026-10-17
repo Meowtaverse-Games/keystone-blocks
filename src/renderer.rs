@@ -9,28 +9,45 @@ use crate::{
     utils::is_ancestor,
 };
 
+const BLOCK_GAP: f32 = 4.0;
+const NESTED_DROP_ZONE_MIN_WIDTH: f32 = 100.0;
+const NESTED_DROP_ZONE_HEIGHT: f32 = 40.0;
+
 fn get_block_frame(color: egui::Color32) -> egui::Frame {
     egui::Frame::NONE
         .fill(color)
+        .corner_radius(egui::CornerRadius::same(6))
+        .inner_margin(egui::Margin::symmetric(8, 6))
+}
+
+// If / Loop / While の中身を入れる「口」の部分(Scratch の C 型ブロック)
+fn get_mouth_frame() -> egui::Frame {
+    egui::Frame::NONE
+        .fill(egui::Color32::from_black_alpha(100))
         .corner_radius(egui::CornerRadius::same(4))
-        .inner_margin(egui::Margin::symmetric(5, 2))
+        .inner_margin(egui::Margin::same(4))
+        .outer_margin(egui::Margin {
+            left: 6,
+            right: 0,
+            top: 4,
+            bottom: 0,
+        })
+        .stroke(egui::Stroke::new(1.0, egui::Color32::from_white_alpha(20)))
 }
 
 fn get_slot_frame() -> egui::Frame {
     egui::Frame::NONE
-        .inner_margin(egui::Margin::symmetric(3, 0))
-        .corner_radius(egui::CornerRadius::same(6))
+        .inner_margin(egui::Margin::symmetric(5, 2))
+        .corner_radius(egui::CornerRadius::same(8))
         .fill(colors::SLOT_BG)
         .stroke(egui::Stroke::new(1.0, colors::SLOT_BORDER))
 }
 
-fn apply_compact_spacing(ui: &mut egui::Ui) {
-    let spacing = ui.spacing_mut();
-    spacing.interact_size = egui::vec2(0.0, 0.0);
-    spacing.button_padding = egui::vec2(2.0, 0.0);
-    spacing.combo_width = 0.0;
-    spacing.item_spacing.x = 3.0;
-    spacing.icon_spacing = 2.0;
+fn get_reporter_frame() -> egui::Frame {
+    egui::Frame::NONE
+        .fill(colors::OPERATORS)
+        .corner_radius(egui::CornerRadius::same(12))
+        .inner_margin(egui::Margin::symmetric(8, 4))
 }
 
 fn fit_text_width(ui: &egui::Ui, text: &str, min_width: f32) -> f32 {
@@ -40,16 +57,16 @@ fn fit_text_width(ui: &egui::Ui, text: &str, min_width: f32) -> f32 {
             .size()
             .x
     });
-    width.max(min_width) + 4.0
+    width.max(min_width) + 8.0
 }
 
-fn compact_text_edit(ui: &mut egui::Ui, text: &mut String, min_width: f32) {
-    let width = fit_text_width(ui, text, min_width);
+fn fitted_text_edit(ui: &mut egui::Ui, text: &mut String) {
+    let width = fit_text_width(ui, text, 20.0);
     ui.add(
         egui::TextEdit::singleline(text)
             .frame(egui::Frame::NONE)
             .desired_width(width)
-            .margin(egui::Margin::symmetric(1, 0)),
+            .margin(egui::Margin::symmetric(4, 1)),
     );
 }
 
@@ -57,41 +74,136 @@ fn unselectable_label(ui: &mut egui::Ui, text: egui::RichText) -> egui::Response
     ui.add(egui::Label::new(text).selectable(false))
 }
 
-pub fn palette_button(
+fn white_label(ui: &mut egui::Ui, text: &str) -> egui::Response {
+    unselectable_label(ui, egui::RichText::new(text).color(colors::TEXT_WHITE))
+}
+
+pub fn apply_block_spacing(ui: &mut egui::Ui) {
+    ui.spacing_mut().combo_width = 0.0;
+}
+
+fn stmt_body_mut(stmt: &mut Statement) -> Option<&mut Vec<Statement>> {
+    match stmt {
+        Statement::If(_, body) | Statement::Loop(_, body) | Statement::While(_, body) => Some(body),
+        _ => None,
+    }
+}
+
+fn draggable_block<R>(
     ui: &mut egui::Ui,
-    label: &str,
-    stmt: Statement,
-    target_blocks: &mut Vec<Statement>,
-) -> f32 {
-    let color = get_stmt_color(&stmt);
-    let item_id = egui::Id::new(format!("palette_{:?}", stmt));
+    id: egui::Id,
+    payload: DraggedBlock,
+    add_contents: impl FnOnce(&mut egui::Ui) -> R,
+) -> egui::InnerResponse<R> {
+    if ui.ctx().is_being_dragged(id) {
+        egui::DragAndDrop::set_payload(ui.ctx(), payload);
 
-    let response = ui.dnd_drag_source(item_id, DraggedBlock::NewStatement(stmt.clone()), |ui| {
-        apply_compact_spacing(ui);
+        let layer_id = egui::LayerId::new(egui::Order::Tooltip, id);
+        let inner = ui.scope_builder(egui::UiBuilder::new().layer_id(layer_id), add_contents);
+
+        if let Some(pointer_pos) = ui.ctx().pointer_interact_pos() {
+            let delta = pointer_pos - inner.response.rect.center();
+            ui.ctx()
+                .transform_layer_shapes(layer_id, egui::emath::TSTransform::from_translation(delta));
+        }
+
+        inner
+    } else {
+        let inner = ui.scope_builder(
+            egui::UiBuilder::new()
+                .id(id)
+                .sense(egui::Sense::click_and_drag()),
+            add_contents,
+        );
+        let response = inner.response.on_hover_cursor(egui::CursorIcon::Grab);
+        egui::InnerResponse::new(inner.inner, response)
+    }
+}
+
+fn statement_block(
+    ui: &mut egui::Ui,
+    stmt: &mut Statement,
+    block_id: egui::Id,
+    payload: DraggedBlock,
+    type_ctx: &TypeContext,
+    body: impl FnOnce(&mut egui::Ui, &mut Vec<Statement>),
+) -> egui::Response {
+    let color = get_stmt_color(stmt);
+
+    draggable_block(ui, block_id.with("drag"), payload, |ui| {
         get_block_frame(color).show(ui, |ui| {
-            ui.horizontal(|ui| {
-                unselectable_label(
-                    ui,
-                    egui::RichText::new("☰")
-                        .color(colors::TEXT_WHITE)
-                        .size(13.0),
-                )
-                .on_hover_cursor(egui::CursorIcon::Grab);
+            ui.vertical(|ui| {
+                ui.horizontal(|ui| {
+                    // 入力欄の枠の高さに合わせておき、ラベルを縦方向の中央に揃える
+                    ui.set_min_height(ui.spacing().interact_size.y + 6.0);
+                    render_statement_header(ui, stmt, block_id, type_ctx);
+                });
 
-                unselectable_label(
-                    ui,
-                    egui::RichText::new(label)
-                        .color(colors::TEXT_WHITE)
-                        .strong(),
-                );
+                if let Some(children) = stmt_body_mut(stmt) {
+                    get_mouth_frame().show(ui, |ui| body(ui, children));
+                }
+            });
+        });
+    })
+    .response
+}
+
+pub fn palette_block(
+    ui: &mut egui::Ui,
+    stmt: &mut Statement,
+    block_id: egui::Id,
+    target_blocks: &mut Vec<Statement>,
+    type_ctx: &TypeContext,
+) -> f32 {
+    apply_block_spacing(ui);
+    let payload = DraggedBlock::NewStatement(stmt.clone());
+
+    let response = statement_block(
+        ui,
+        stmt,
+        block_id,
+        payload,
+        type_ctx,
+        |ui, _| {
+            ui.allocate_space(egui::vec2(40.0, 8.0));
+        },
+    );
+
+    if response.clicked() {
+        target_blocks.push(stmt.clone());
+    }
+
+    ui.add_space(BLOCK_GAP);
+    response.rect.width()
+}
+
+pub fn palette_expr_block(
+    ui: &mut egui::Ui,
+    caption: Option<&str>,
+    expr: &mut Expr,
+    block_id: egui::Id,
+    type_ctx: &TypeContext,
+) -> f32 {
+    apply_block_spacing(ui);
+    let payload = DraggedBlock::NewExpr(expr.clone());
+
+    let response = draggable_block(ui, block_id.with("drag"), payload, |ui| {
+        get_reporter_frame().show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.set_min_height(ui.spacing().interact_size.y + 6.0);
+                if let Some(caption) = caption {
+                    unselectable_label(
+                        ui,
+                        egui::RichText::new(caption)
+                            .color(colors::TEXT_WHITE)
+                            .strong(),
+                    );
+                }
+                expr_contents(ui, expr, block_id, type_ctx);
             });
         });
     });
-
-    if response.response.clicked() {
-        target_blocks.push(stmt);
-    }
-
+    ui.add_space(BLOCK_GAP);
     response.response.rect.width()
 }
 
@@ -102,9 +214,8 @@ pub fn block_list(
     move_request: &mut Option<MoveRequest>,
     type_ctx: &TypeContext,
 ) {
-    let mut delete_target_idx = None;
-    apply_compact_spacing(ui);
     ui.spacing_mut().item_spacing.y = 0.0;
+    apply_block_spacing(ui);
 
     for idx in 0..current_blocks.len() {
         let mut this_path = current_path.clone();
@@ -116,7 +227,6 @@ pub fn block_list(
             .collect::<Vec<_>>()
             .join("_");
         let block_id = egui::Id::new(&current_id_str);
-        let block_color = get_stmt_color(&current_blocks[idx]);
 
         ui.scope(|ui| {
             ui.visuals_mut().widgets.active.bg_fill = egui::Color32::TRANSPARENT;
@@ -125,28 +235,18 @@ pub fn block_list(
 
             let (_, dropped_payload) =
                 ui.dnd_drop_zone::<DraggedBlock, _>(egui::Frame::NONE, |ui| {
-                    get_block_frame(block_color).show(ui, |ui| {
-                        ui.vertical(|ui| {
-                            render_statement_header(
-                                ui,
-                                &mut current_blocks[idx],
-                                &this_path,
-                                block_id,
-                                &mut delete_target_idx,
-                                idx,
-                                type_ctx,
-                            );
-
-                            render_statement_body(
-                                ui,
-                                &mut current_blocks[idx],
-                                &this_path,
-                                &current_id_str,
-                                move_request,
-                                type_ctx,
-                            );
-                        });
-                    });
+                    statement_block(
+                        ui,
+                        &mut current_blocks[idx],
+                        block_id,
+                        DraggedBlock::MoveStatement {
+                            path: this_path.clone(),
+                        },
+                        type_ctx,
+                        |ui, children| {
+                            block_list(ui, children, this_path.clone(), move_request, type_ctx);
+                        },
+                    );
                 });
 
             if let Some(payload) = dropped_payload
@@ -161,201 +261,122 @@ pub fn block_list(
                 );
             }
 
-            ui.add_space(2.0);
+            ui.add_space(BLOCK_GAP);
         });
     }
 
     render_bottom_drop_zone(ui, current_blocks, &current_path, move_request);
-
-    if let Some(idx) = delete_target_idx {
-        current_blocks.remove(idx);
-    }
 }
 
 fn render_statement_header(
     ui: &mut egui::Ui,
     stmt: &mut Statement,
-    this_path: &[usize],
     block_id: egui::Id,
-    delete_target_idx: &mut Option<usize>,
-    idx: usize,
     type_ctx: &TypeContext,
 ) {
-    ui.horizontal(|ui| {
-        let (icon, name) = get_stmt_info(stmt);
+    let (icon, name) = get_stmt_info(stmt);
+    unselectable_label(
+        ui,
+        egui::RichText::new(format!("{} {}", icon, name))
+            .color(colors::TEXT_WHITE)
+            .strong(),
+    );
 
-        ui.dnd_drag_source(
-            block_id.with("drag_handle"),
-            DraggedBlock::MoveStatement {
-                path: this_path.to_vec(),
-            },
-            |ui| {
-                ui.horizontal(|ui| {
-                    unselectable_label(
-                        ui,
-                        egui::RichText::new("☰")
-                            .color(colors::TEXT_WHITE)
-                            .size(13.0),
-                    )
-                    .on_hover_cursor(egui::CursorIcon::Grab);
-
-                    unselectable_label(
-                        ui,
-                        egui::RichText::new(format!("{} {}", icon, name))
-                            .color(colors::TEXT_WHITE)
-                            .strong(),
-                    )
-                    .on_hover_cursor(egui::CursorIcon::Grab);
-                });
-            },
-        );
-
-        match stmt {
-            Statement::Print(expr) => {
-                expr_slot(ui, expr, block_id.with("print_expr"), None, type_ctx);
-            }
-            Statement::Sleep(expr) => {
-                expr_slot(
-                    ui,
-                    expr,
-                    block_id.with("sleep_expr"),
-                    Some(Type::Float),
-                    type_ctx,
-                );
-                unselectable_label(ui, egui::RichText::new("sec").color(colors::TEXT_WHITE));
-            }
-            Statement::Move(expr) => {
-                expr_slot(
-                    ui,
-                    expr,
-                    block_id.with("move_expr"),
-                    Some(Type::Direction),
-                    type_ctx,
-                );
-            }
-            Statement::Turn(expr) => {
-                expr_slot(
-                    ui,
-                    expr,
-                    block_id.with("turn_expr"),
-                    Some(Type::Direction),
-                    type_ctx,
-                );
-            }
-            Statement::Dig(expr) => {
-                expr_slot(
-                    ui,
-                    expr,
-                    block_id.with("dig_expr"),
-                    Some(Type::Direction),
-                    type_ctx,
-                );
-            }
-            Statement::Place(expr) => {
-                expr_slot(
-                    ui,
-                    expr,
-                    block_id.with("place_expr"),
-                    Some(Type::Direction),
-                    type_ctx,
-                );
-            }
-            Statement::Let(name, expr) => {
-                get_slot_frame().show(ui, |ui| {
-                    compact_text_edit(ui, name, 16.0);
-                });
-                unselectable_label(
-                    ui,
-                    egui::RichText::new("=").color(colors::TEXT_WHITE).strong(),
-                );
-                expr_slot(ui, expr, block_id.with("let_expr"), None, type_ctx);
-            }
-            Statement::Send(expr) => {
-                expr_slot(ui, expr, block_id.with("send_expr"), None, type_ctx);
-            }
-            Statement::Receive(expr) => {
-                expr_slot(ui, expr, block_id.with("receive_expr"), None, type_ctx);
-            }
-            Statement::If(cond, _) => {
-                expr_slot(
-                    ui,
-                    cond,
-                    block_id.with("if_cond"),
-                    Some(Type::Boolean),
-                    type_ctx,
-                );
-            }
-            Statement::Loop(expr, _) => {
-                expr_slot(
-                    ui,
-                    expr,
-                    block_id.with("loop_count"),
-                    Some(Type::Uint),
-                    type_ctx,
-                );
-                unselectable_label(ui, egui::RichText::new("times").color(colors::TEXT_WHITE));
-            }
-            Statement::While(cond, _) => {
-                expr_slot(
-                    ui,
-                    cond,
-                    block_id.with("while_cond"),
-                    Some(Type::Boolean),
-                    type_ctx,
-                );
-            }
+    match stmt {
+        Statement::Print(expr) => {
+            expr_slot(ui, expr, block_id.with("print_expr"), None, type_ctx);
         }
-
-        if ui
-            .add(egui::Button::new(egui::RichText::new("✖").color(egui::Color32::RED)).frame(false))
-            .clicked()
-        {
-            *delete_target_idx = Some(idx);
+        Statement::Sleep(expr) => {
+            expr_slot(
+                ui,
+                expr,
+                block_id.with("sleep_expr"),
+                Some(Type::Float),
+                type_ctx,
+            );
+            white_label(ui, "sec");
         }
-    });
-}
-
-fn render_statement_body(
-    ui: &mut egui::Ui,
-    stmt: &mut Statement,
-    this_path: &[usize],
-    current_id_str: &str,
-    move_request: &mut Option<MoveRequest>,
-    type_ctx: &TypeContext,
-) {
-    if let Statement::If(_, body) | Statement::Loop(_, body) | Statement::While(_, body) = stmt {
-        render_collapsing_body(
-            ui,
-            body,
-            this_path.to_vec(),
-            current_id_str,
-            move_request,
-            type_ctx,
-        );
+        Statement::Move(expr) => {
+            expr_slot(
+                ui,
+                expr,
+                block_id.with("move_expr"),
+                Some(Type::Direction),
+                type_ctx,
+            );
+        }
+        Statement::Turn(expr) => {
+            expr_slot(
+                ui,
+                expr,
+                block_id.with("turn_expr"),
+                Some(Type::Direction),
+                type_ctx,
+            );
+        }
+        Statement::Dig(expr) => {
+            expr_slot(
+                ui,
+                expr,
+                block_id.with("dig_expr"),
+                Some(Type::Direction),
+                type_ctx,
+            );
+        }
+        Statement::Place(expr) => {
+            expr_slot(
+                ui,
+                expr,
+                block_id.with("place_expr"),
+                Some(Type::Direction),
+                type_ctx,
+            );
+        }
+        Statement::Let(name, expr) => {
+            get_slot_frame().show(ui, |ui| {
+                fitted_text_edit(ui, name);
+            });
+            unselectable_label(
+                ui,
+                egui::RichText::new("=").color(colors::TEXT_WHITE).strong(),
+            );
+            expr_slot(ui, expr, block_id.with("let_expr"), None, type_ctx);
+        }
+        Statement::Send(expr) => {
+            expr_slot(ui, expr, block_id.with("send_expr"), None, type_ctx);
+        }
+        Statement::Receive(expr) => {
+            expr_slot(ui, expr, block_id.with("receive_expr"), None, type_ctx);
+        }
+        Statement::If(cond, _) => {
+            expr_slot(
+                ui,
+                cond,
+                block_id.with("if_cond"),
+                Some(Type::Boolean),
+                type_ctx,
+            );
+        }
+        Statement::Loop(expr, _) => {
+            expr_slot(
+                ui,
+                expr,
+                block_id.with("loop_count"),
+                Some(Type::Uint),
+                type_ctx,
+            );
+            white_label(ui, "times");
+        }
+        Statement::While(cond, _) => {
+            expr_slot(
+                ui,
+                cond,
+                block_id.with("while_cond"),
+                Some(Type::Boolean),
+                type_ctx,
+            );
+        }
     }
-}
-
-fn render_collapsing_body(
-    ui: &mut egui::Ui,
-    body: &mut Vec<Statement>,
-    this_path: Vec<usize>,
-    current_id_str: &str,
-    move_request: &mut Option<MoveRequest>,
-    type_ctx: &TypeContext,
-) {
-    egui::CollapsingHeader::new(egui::RichText::new("body").color(colors::TEXT_WHITE))
-        .id_salt(current_id_str)
-        .default_open(true)
-        .show(ui, |ui| {
-            egui::Frame::new()
-                .fill(egui::Color32::from_black_alpha(100))
-                .corner_radius(egui::CornerRadius::same(4))
-                .inner_margin(egui::Margin::same(3))
-                .stroke(egui::Stroke::new(1.0, egui::Color32::from_white_alpha(20)))
-                .show(ui, |ui| {
-                    block_list(ui, body, this_path, move_request, type_ctx);
-                });
-        });
 }
 
 fn render_bottom_drop_zone(
@@ -369,15 +390,14 @@ fn render_bottom_drop_zone(
         ui.visuals_mut().widgets.inactive.bg_fill = egui::Color32::TRANSPARENT;
         ui.visuals_mut().widgets.active.bg_stroke = egui::Stroke::NONE;
 
+        // ネスト内はパネル幅いっぱいに広げず、中のブロック幅に合わせる
         let size = if current_path.is_empty() {
             egui::vec2(ui.available_width(), ui.available_height().max(140.0))
         } else {
-            let width = if current_blocks.is_empty() {
-                60.0
-            } else {
-                ui.min_rect().width()
-            };
-            egui::vec2(width, ui.text_style_height(&egui::TextStyle::Body))
+            egui::vec2(
+                ui.min_rect().width().max(NESTED_DROP_ZONE_MIN_WIDTH),
+                NESTED_DROP_ZONE_HEIGHT,
+            )
         };
 
         let (_, bottom_payload) = ui.dnd_drop_zone::<DraggedBlock, _>(
@@ -487,116 +507,13 @@ pub fn expr_slot(
     expected_type: Option<Type>,
     type_ctx: &TypeContext,
 ) {
-    let frame = get_slot_frame();
-
     ui.scope(|ui| {
         ui.visuals_mut().widgets.active.bg_fill = colors::SLOT_BG;
         ui.visuals_mut().widgets.inactive.bg_fill = colors::SLOT_BG;
         ui.visuals_mut().widgets.active.bg_stroke = egui::Stroke::new(1.0, colors::TEXT_WHITE);
 
-        let (_, dropped_payload) = ui.dnd_drop_zone::<DraggedBlock, _>(frame, |ui| {
-            ui.horizontal(|ui| match expr {
-                Expr::Var(name) => {
-                    compact_text_edit(ui, name, 16.0);
-                }
-
-                Expr::Uint(v) => {
-                    let mut val = *v as i64;
-                    if ui.add(egui::DragValue::new(&mut val).speed(1)).changed() {
-                        *v = val.max(0) as u32;
-                    }
-                }
-
-                Expr::Float(v) => {
-                    ui.add(egui::DragValue::new(v).speed(0.1));
-                }
-
-                Expr::String(s) => {
-                    compact_text_edit(ui, s, 16.0);
-                }
-
-                Expr::Boolean(b) => {
-                    ui.checkbox(b, if *b { "true" } else { "false" });
-                }
-
-                Expr::Direction(dir) => {
-                    direction_combobox(ui, dir, &slot_id.with("dir").value().to_string());
-                }
-
-                Expr::Binary { op, lhs, rhs } => {
-                    let child_expected_type = match op {
-                        Op::Add | Op::Sub | Op::Mul | Op::Div => Some(Type::Uint),
-                        Op::Eq | Op::Neq | Op::Lt | Op::Gt | Op::Le | Op::Ge => Some(Type::Uint),
-                        Op::And | Op::Or => Some(Type::Boolean),
-                    };
-
-                    expr_slot(
-                        ui,
-                        lhs,
-                        slot_id.with("lhs"),
-                        child_expected_type.clone(),
-                        type_ctx,
-                    );
-
-                    binary_combobox(ui, op, &slot_id.with("Op").value().to_string());
-
-                    expr_slot(ui, rhs, slot_id.with("rhs"), child_expected_type, type_ctx);
-                }
-
-                Expr::Unary { op, exp } => {
-                    let label_text = match op {
-                        UnaryOp::Not => "not",
-                    };
-                    unselectable_label(
-                        ui,
-                        egui::RichText::new(label_text).color(colors::TEXT_WHITE),
-                    );
-                    expr_slot(
-                        ui,
-                        exp,
-                        slot_id.with("inner"),
-                        Some(Type::Boolean),
-                        type_ctx,
-                    );
-                }
-
-                Expr::Call { callee, args } => {
-                    let name = match callee {
-                        Callee::IsTouched => "is_touched",
-                        Callee::IsEmpty => "is_empty",
-                        Callee::Rand => "rand",
-                    };
-
-                    unselectable_label(ui, egui::RichText::new(name).color(colors::TEXT_WHITE));
-
-                    unselectable_label(ui, egui::RichText::new("(").color(colors::TEXT_WHITE));
-
-                    let arg_expected_type = match callee {
-                        Callee::IsTouched => None,
-                        Callee::IsEmpty => Some(Type::Direction),
-                        Callee::Rand => Some(Type::Uint),
-                    };
-
-                    for (idx, arg) in args.iter_mut().enumerate() {
-                        if idx > 0 {
-                            unselectable_label(
-                                ui,
-                                egui::RichText::new(", ").color(colors::TEXT_WHITE),
-                            );
-                        }
-
-                        expr_slot(
-                            ui,
-                            arg,
-                            slot_id.with(idx),
-                            arg_expected_type.clone(),
-                            type_ctx,
-                        );
-                    }
-
-                    unselectable_label(ui, egui::RichText::new(")").color(colors::TEXT_WHITE));
-                }
-            });
+        let (_, dropped_payload) = ui.dnd_drop_zone::<DraggedBlock, _>(get_slot_frame(), |ui| {
+            ui.horizontal(|ui| expr_contents(ui, expr, slot_id, type_ctx));
         });
 
         if let Some(payload) = dropped_payload
@@ -608,34 +525,100 @@ pub fn expr_slot(
     });
 }
 
-pub fn expr_palette_button(ui: &mut egui::Ui, label: &str, expr: Expr) -> f32 {
-    let item_id = egui::Id::new(format!("expr_palette_{}", label));
+fn expr_contents(ui: &mut egui::Ui, expr: &mut Expr, slot_id: egui::Id, type_ctx: &TypeContext) {
+    match expr {
+        Expr::Var(name) => {
+            fitted_text_edit(ui, name);
+        }
 
-    let response = ui.dnd_drag_source(item_id, DraggedBlock::NewExpr(expr.clone()), |ui| {
-        apply_compact_spacing(ui);
-        egui::Frame::NONE
-            .fill(colors::OPERATORS)
-            .corner_radius(egui::CornerRadius::same(8))
-            .inner_margin(egui::Margin::symmetric(5, 1))
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    unselectable_label(
-                        ui,
-                        egui::RichText::new("")
-                            .color(colors::TEXT_WHITE.linear_multiply(0.7))
-                            .size(11.0),
-                    )
-                    .on_hover_cursor(egui::CursorIcon::Grab);
+        Expr::Uint(v) => {
+            let mut val = *v as i64;
+            if ui.add(egui::DragValue::new(&mut val).speed(1)).changed() {
+                *v = val.max(0) as u32;
+            }
+        }
 
-                    unselectable_label(
-                        ui,
-                        egui::RichText::new(label)
-                            .color(colors::TEXT_WHITE)
-                            .strong(),
-                    );
-                });
-            });
-    });
+        Expr::Float(v) => {
+            ui.add(egui::DragValue::new(v).speed(0.1));
+        }
 
-    response.response.rect.width()
+        Expr::String(s) => {
+            fitted_text_edit(ui, s);
+        }
+
+        Expr::Boolean(b) => {
+            ui.checkbox(b, if *b { "true" } else { "false" });
+        }
+
+        Expr::Direction(dir) => {
+            direction_combobox(ui, dir, &slot_id.with("dir").value().to_string());
+        }
+
+        Expr::Binary { op, lhs, rhs } => {
+            let child_expected_type = match op {
+                Op::Add | Op::Sub | Op::Mul | Op::Div => Some(Type::Uint),
+                Op::Eq | Op::Neq | Op::Lt | Op::Gt | Op::Le | Op::Ge => Some(Type::Uint),
+                Op::And | Op::Or => Some(Type::Boolean),
+            };
+
+            expr_slot(
+                ui,
+                lhs,
+                slot_id.with("lhs"),
+                child_expected_type.clone(),
+                type_ctx,
+            );
+
+            binary_combobox(ui, op, &slot_id.with("Op").value().to_string());
+
+            expr_slot(ui, rhs, slot_id.with("rhs"), child_expected_type, type_ctx);
+        }
+
+        Expr::Unary { op, exp } => {
+            let label_text = match op {
+                UnaryOp::Not => "not",
+            };
+            white_label(ui, label_text);
+            expr_slot(
+                ui,
+                exp,
+                slot_id.with("inner"),
+                Some(Type::Boolean),
+                type_ctx,
+            );
+        }
+
+        Expr::Call { callee, args } => {
+            let name = match callee {
+                Callee::IsTouched => "is_touched",
+                Callee::IsEmpty => "is_empty",
+                Callee::Rand => "rand",
+            };
+
+            white_label(ui, name);
+            white_label(ui, "(");
+
+            let arg_expected_type = match callee {
+                Callee::IsTouched => None,
+                Callee::IsEmpty => Some(Type::Direction),
+                Callee::Rand => Some(Type::Uint),
+            };
+
+            for (idx, arg) in args.iter_mut().enumerate() {
+                if idx > 0 {
+                    white_label(ui, ", ");
+                }
+
+                expr_slot(
+                    ui,
+                    arg,
+                    slot_id.with(idx),
+                    arg_expected_type.clone(),
+                    type_ctx,
+                );
+            }
+
+            white_label(ui, ")");
+        }
+    }
 }
