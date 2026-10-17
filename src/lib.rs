@@ -3,6 +3,7 @@ mod colorizer;
 mod renderer;
 
 mod structs;
+mod sync;
 mod utils;
 use bevy::prelude::*;
 use bevy_egui::egui::{self, Color32};
@@ -11,6 +12,7 @@ use keystone_lang::{Callee, Direction, Expr, Op, Statement, TypeContext, UnaryOp
 use renderer as render;
 pub use structs::VplState;
 use structs::*;
+pub use sync::CodeSyncStatus;
 use utils::*;
 
 pub struct VisualProgrammingPlugin;
@@ -131,6 +133,39 @@ fn horizontal_splitter(ui: &mut egui::Ui, width: f32) -> egui::Response {
 const STACKED_PALETTE_HEIGHT_RATIO: f32 = 0.4;
 const STACKED_MIN_HEIGHT: f32 = 80.0;
 const SPLITTER_HEIGHT: f32 = 12.0;
+pub fn show_vpl_for_code(
+    ui: &mut egui::Ui,
+    state: &mut VplState,
+    source_id: usize,
+    code: &mut String,
+) -> bool {
+    state.sync_from_code(source_id, code);
+
+    if let CodeSyncStatus::SyntaxError(message) = state.sync_status() {
+        show_syntax_error(ui, message);
+        return false;
+    }
+
+    show_vpl_contents(ui, state);
+    state.write_back(code)
+}
+
+fn show_syntax_error(ui: &mut egui::Ui, message: &str) {
+    ui.vertical(|ui| {
+        ui.label(
+            egui::RichText::new("⚠ This code has a syntax error, so it can't be shown as blocks.")
+                .strong(),
+        );
+        ui.label("Fix it in the text editor (or clear the code) to edit it with blocks.");
+        ui.add_space(6.0);
+        egui::ScrollArea::vertical()
+            .id_salt("vpl_syntax_error_scroll")
+            .show(ui, |ui| {
+                ui.label(egui::RichText::new(message).monospace().weak());
+            });
+    });
+}
+
 const PALETTE_EXTRA_WIDTH: f32 = 16.0;
 
 pub fn generate_code_from_state(state: &VplState) -> String {

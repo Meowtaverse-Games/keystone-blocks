@@ -2,6 +2,8 @@ use bevy::prelude::*;
 use bevy_egui::egui;
 use keystone_lang::{Expr, Statement, Type, TypeContext};
 
+use crate::sync::CodeSync;
+
 #[derive(Clone, Debug)]
 pub enum DraggedBlock {
     NewStatement(Statement),
@@ -31,6 +33,7 @@ pub struct VplState {
     pub type_ctx: TypeContext,
     pub generated_code: String,
     pub is_visible: bool,
+    pub(crate) sync: CodeSync,
 }
 
 impl Default for VplState {
@@ -40,6 +43,7 @@ impl Default for VplState {
             type_ctx: TypeContext::new(),
             generated_code: String::new(),
             is_visible: false,
+            sync: CodeSync::default(),
         }
     }
 }

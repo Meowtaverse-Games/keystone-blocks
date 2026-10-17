@@ -8,7 +8,7 @@ impl ToCode for Expr {
     fn to_code(&self) -> String {
         match self {
             Expr::Uint(v) => format!("{}", v),
-            Expr::Float(v) => format!("{:.1}", v),
+            Expr::Float(v) => format!("{:?}", v),
             Expr::String(s) => format!("\"{}\"", s),
             Expr::Boolean(b) => format!("{}", b),
             Expr::Direction(d) => match d {
