@@ -74,8 +74,13 @@ fn show_side_by_side(
 }
 
 fn show_stacked(ui: &mut egui::Ui, rect: egui::Rect, state: &mut VplState, type_ctx: &TypeContext) {
-    let palette_height =
-        (rect.height() * STACKED_PALETTE_HEIGHT_RATIO).max(STACKED_PALETTE_MIN_HEIGHT);
+    let ratio_id = ui.make_persistent_id("vpl_stacked_palette_ratio");
+    let ratio = ui
+        .data(|d| d.get_temp::<f32>(ratio_id))
+        .unwrap_or(STACKED_PALETTE_HEIGHT_RATIO);
+    let max_palette_height =
+        (rect.height() - STACKED_MIN_HEIGHT - SPLITTER_HEIGHT).max(STACKED_MIN_HEIGHT);
+    let palette_height = (rect.height() * ratio).clamp(STACKED_MIN_HEIGHT, max_palette_height);
 
     ui.scope_builder(
         egui::UiBuilder::new()
@@ -87,19 +92,45 @@ fn show_stacked(ui: &mut egui::Ui, rect: egui::Rect, state: &mut VplState, type_
                 egui::Layout::top_down(egui::Align::Min),
                 |ui| {
                     ui.set_width(rect.width());
+                    ui.set_height(palette_height);
                     render_palette_panel(ui, &mut state.blocks, type_ctx, true);
                 },
             );
 
-            ui.separator();
+            let splitter = horizontal_splitter(ui, rect.width());
+            if splitter.dragged() {
+                let new_height = palette_height + splitter.drag_delta().y;
+                ui.data_mut(|d| d.insert_temp(ratio_id, new_height / rect.height()));
+            }
 
             render_program_panel(ui, &mut state.blocks, type_ctx);
         },
     );
 }
 
+fn horizontal_splitter(ui: &mut egui::Ui, width: f32) -> egui::Response {
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(width, SPLITTER_HEIGHT), egui::Sense::drag());
+    let response = response.on_hover_cursor(egui::CursorIcon::ResizeVertical);
+
+    let visuals = ui.style().interact(&response);
+    let stroke = if response.hovered() || response.dragged() {
+        visuals.fg_stroke
+    } else {
+        ui.visuals().widgets.noninteractive.bg_stroke
+    };
+    let painter = ui.painter();
+    painter.hline(rect.x_range(), rect.center().y, stroke);
+
+    let grip = egui::Rect::from_center_size(rect.center(), egui::vec2(36.0, 4.0));
+    painter.rect_filled(grip, egui::CornerRadius::same(2), visuals.fg_stroke.color);
+
+    response
+}
+
 const STACKED_PALETTE_HEIGHT_RATIO: f32 = 0.4;
-const STACKED_PALETTE_MIN_HEIGHT: f32 = 120.0;
+const STACKED_MIN_HEIGHT: f32 = 80.0;
+const SPLITTER_HEIGHT: f32 = 12.0;
 const PALETTE_EXTRA_WIDTH: f32 = 16.0;
 
 pub fn generate_code_from_state(state: &VplState) -> String {
@@ -232,9 +263,6 @@ fn render_palette_panel(
     type_ctx: &TypeContext,
     wrapped: bool,
 ) -> f32 {
-    ui.heading("➕ Add Blocks");
-    ui.separator();
-
     let entries_id = ui.make_persistent_id("vpl_palette_entries");
     let mut entries = ui
         .data(|d| d.get_temp::<Vec<PaletteEntry>>(entries_id))
@@ -359,20 +387,43 @@ fn section_label(ui: &mut egui::Ui, text: &str) {
 }
 
 fn render_program_panel(ui: &mut egui::Ui, blocks: &mut Vec<Statement>, type_ctx: &TypeContext) {
-    ui.heading("📝 Current Program");
-    ui.separator();
-
     egui::ScrollArea::both()
         .id_salt("right_program_scroll")
         .show(ui, |ui| {
-            let mut move_request = None;
+            let mut drop_target = None;
 
-            render::block_list(ui, blocks, Vec::new(), &mut move_request, type_ctx);
+            render::block_list(ui, blocks, Vec::new(), &mut drop_target, type_ctx);
 
-            if let Some(req) = move_request {
-                handle_move_request(blocks, req);
+            if let Some(target) = drop_target
+                && let Some(marker) = target.marker
+            {
+                render::paint_drop_marker(ui, marker);
+
+                if ui.input(|i| i.pointer.any_released())
+                    && let Some(payload) = egui::DragAndDrop::take_payload::<DraggedBlock>(ui.ctx())
+                {
+                    apply_drop(blocks, payload.as_ref(), target);
+                }
             }
         });
+}
+
+fn apply_drop(blocks: &mut Vec<Statement>, payload: &DraggedBlock, target: DropTarget) {
+    match payload {
+        DraggedBlock::NewStatement(stmt) => {
+            insert_statement_at_path(blocks, &target.list_path, target.insert_idx, stmt.clone());
+        }
+        DraggedBlock::MoveStatement { path } => {
+            handle_move_request(
+                blocks,
+                MoveRequest {
+                    src_path: path.clone(),
+                    target_path: target.list_path,
+                    insert_idx: target.insert_idx,
+                },
+            );
+        }
+    }
 }
 
 fn handle_move_request(blocks: &mut Vec<Statement>, req: MoveRequest) {

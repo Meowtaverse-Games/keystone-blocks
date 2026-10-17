@@ -5,13 +5,17 @@ use bevy_egui::egui;
 use keystone_lang::{Callee, Direction, Expr, Op, Statement, Type, TypeContext, UnaryOp};
 
 use crate::{
-    structs::{DraggedBlock, MoveRequest},
+    structs::{DraggedBlock, DraggedExpr, DropTarget},
     utils::is_ancestor,
 };
 
 const BLOCK_GAP: f32 = 4.0;
 const NESTED_DROP_ZONE_MIN_WIDTH: f32 = 100.0;
 const NESTED_DROP_ZONE_HEIGHT: f32 = 40.0;
+const DROP_MARKER_HEIGHT: f32 = 6.0;
+const DROP_MARKER_MIN_WIDTH: f32 = 80.0;
+const DROP_MARKER_FILL: egui::Color32 = egui::Color32::from_rgb(255, 214, 0);
+const DROP_MARKER_STROKE: egui::Color32 = egui::Color32::BLACK;
 
 fn get_block_frame(color: egui::Color32) -> egui::Frame {
     egui::Frame::NONE
@@ -64,6 +68,7 @@ fn fitted_text_edit(ui: &mut egui::Ui, text: &mut String) {
     let width = fit_text_width(ui, text, 20.0);
     ui.add(
         egui::TextEdit::singleline(text)
+            .text_color(colors::TEXT_WHITE)
             .frame(egui::Frame::NONE)
             .desired_width(width)
             .margin(egui::Margin::symmetric(4, 1)),
@@ -89,10 +94,10 @@ fn stmt_body_mut(stmt: &mut Statement) -> Option<&mut Vec<Statement>> {
     }
 }
 
-fn draggable_block<R>(
+fn draggable_block<P: std::any::Any + Send + Sync, R>(
     ui: &mut egui::Ui,
     id: egui::Id,
-    payload: DraggedBlock,
+    payload: P,
     add_contents: impl FnOnce(&mut egui::Ui) -> R,
 ) -> egui::InnerResponse<R> {
     if ui.ctx().is_being_dragged(id) {
@@ -129,25 +134,31 @@ fn statement_block(
     payload: DraggedBlock,
     type_ctx: &TypeContext,
     body: impl FnOnce(&mut egui::Ui, &mut Vec<Statement>),
-) -> egui::Response {
+) -> (egui::Response, egui::Rect) {
     let color = get_stmt_color(stmt);
 
-    draggable_block(ui, block_id.with("drag"), payload, |ui| {
-        get_block_frame(color).show(ui, |ui| {
-            ui.vertical(|ui| {
-                ui.horizontal(|ui| {
-                    // 入力欄の枠の高さに合わせておき、ラベルを縦方向の中央に揃える
-                    ui.set_min_height(ui.spacing().interact_size.y + 6.0);
-                    render_statement_header(ui, stmt, block_id, type_ctx);
-                });
+    let inner = draggable_block(ui, block_id.with("drag"), payload, |ui| {
+        get_block_frame(color)
+            .show(ui, |ui| {
+                ui.vertical(|ui| {
+                    let header_rect = ui
+                        .horizontal(|ui| {
+                            ui.set_min_height(ui.spacing().interact_size.y + 6.0);
+                            render_statement_header(ui, stmt, block_id, type_ctx);
+                        })
+                        .response
+                        .rect;
 
-                if let Some(children) = stmt_body_mut(stmt) {
-                    get_mouth_frame().show(ui, |ui| body(ui, children));
-                }
-            });
-        });
-    })
-    .response
+                    if let Some(children) = stmt_body_mut(stmt) {
+                        get_mouth_frame().show(ui, |ui| body(ui, children));
+                    }
+                    header_rect
+                })
+                .inner
+            })
+            .inner
+    });
+    (inner.response, inner.inner)
 }
 
 pub fn palette_block(
@@ -160,7 +171,7 @@ pub fn palette_block(
     apply_block_spacing(ui);
     let payload = DraggedBlock::NewStatement(stmt.clone());
 
-    let response = statement_block(ui, stmt, block_id, payload, type_ctx, |ui, _| {
+    let (response, _) = statement_block(ui, stmt, block_id, payload, type_ctx, |ui, _| {
         ui.allocate_space(egui::vec2(40.0, 8.0));
     });
 
@@ -180,7 +191,7 @@ pub fn palette_expr_block(
     type_ctx: &TypeContext,
 ) -> f32 {
     apply_block_spacing(ui);
-    let payload = DraggedBlock::NewExpr(expr.clone());
+    let payload = DraggedExpr(expr.clone());
 
     let response = draggable_block(ui, block_id.with("drag"), payload, |ui| {
         get_reporter_frame().show(ui, |ui| {
@@ -202,17 +213,61 @@ pub fn palette_expr_block(
     response.response.rect.width()
 }
 
+fn dragged_statement(ui: &egui::Ui) -> Option<(egui::Pos2, std::sync::Arc<DraggedBlock>)> {
+    let payload = egui::DragAndDrop::payload::<DraggedBlock>(ui.ctx())?;
+    let pos = ui.ctx().pointer_interact_pos()?;
+    ui.clip_rect().contains(pos).then_some((pos, payload))
+}
+
+fn marker_rect(left: f32, y: f32, width: f32) -> egui::Rect {
+    egui::Rect::from_min_size(
+        egui::pos2(left, y - DROP_MARKER_HEIGHT / 2.0),
+        egui::vec2(width.max(DROP_MARKER_MIN_WIDTH), DROP_MARKER_HEIGHT),
+    )
+}
+
+fn make_drop_target(
+    payload: &DraggedBlock,
+    list_path: &[usize],
+    insert_idx: usize,
+    marker: egui::Rect,
+) -> DropTarget {
+    let valid = match payload {
+        DraggedBlock::MoveStatement { path } => {
+            path.as_slice() != list_path && !is_ancestor(path, list_path)
+        }
+        DraggedBlock::NewStatement(_) => true,
+    };
+    DropTarget {
+        list_path: list_path.to_vec(),
+        insert_idx,
+        marker: valid.then_some(marker),
+    }
+}
+
+pub fn paint_drop_marker(ui: &egui::Ui, marker: egui::Rect) {
+    ui.painter().rect(
+        marker,
+        egui::CornerRadius::same(3),
+        DROP_MARKER_FILL,
+        egui::Stroke::new(1.5, DROP_MARKER_STROKE),
+        egui::StrokeKind::Outside,
+    );
+}
+
 pub fn block_list(
     ui: &mut egui::Ui,
-    current_blocks: &mut Vec<Statement>,
+    current_blocks: &mut [Statement],
     current_path: Vec<usize>,
-    move_request: &mut Option<MoveRequest>,
+    drop_target: &mut Option<DropTarget>,
     type_ctx: &TypeContext,
 ) {
     ui.spacing_mut().item_spacing.y = 0.0;
     apply_block_spacing(ui);
+    let dragged = dragged_statement(ui);
+    let list_right = ui.max_rect().right();
 
-    for idx in 0..current_blocks.len() {
+    for (idx, stmt) in current_blocks.iter_mut().enumerate() {
         let mut this_path = current_path.clone();
         this_path.push(idx);
 
@@ -222,45 +277,67 @@ pub fn block_list(
             .collect::<Vec<_>>()
             .join("_");
         let block_id = egui::Id::new(&current_id_str);
+        let has_body = stmt_body_mut(stmt).is_some();
 
-        ui.scope(|ui| {
-            ui.visuals_mut().widgets.active.bg_fill = egui::Color32::TRANSPARENT;
-            ui.visuals_mut().widgets.inactive.bg_fill = egui::Color32::TRANSPARENT;
-            ui.visuals_mut().widgets.active.bg_stroke = egui::Stroke::new(1.0, colors::TEXT_WHITE);
+        let (response, header_rect) = statement_block(
+            ui,
+            stmt,
+            block_id,
+            DraggedBlock::MoveStatement {
+                path: this_path.clone(),
+            },
+            type_ctx,
+            |ui, children| {
+                block_list(ui, children, this_path.clone(), drop_target, type_ctx);
+            },
+        );
+        let rect = response.rect;
+        ui.add_space(BLOCK_GAP);
 
-            let (_, dropped_payload) =
-                ui.dnd_drop_zone::<DraggedBlock, _>(egui::Frame::NONE, |ui| {
-                    statement_block(
-                        ui,
-                        &mut current_blocks[idx],
-                        block_id,
-                        DraggedBlock::MoveStatement {
-                            path: this_path.clone(),
-                        },
-                        type_ctx,
-                        |ui, children| {
-                            block_list(ui, children, this_path.clone(), move_request, type_ctx);
-                        },
-                    );
+        if drop_target.is_none()
+            && let Some((pos, payload)) = &dragged
+        {
+            let hit_rect = egui::Rect::from_min_max(
+                rect.min,
+                egui::pos2(list_right.max(rect.right()), rect.bottom() + BLOCK_GAP),
+            );
+            if hit_rect.contains(*pos) {
+                let split_y = if has_body {
+                    header_rect.center().y
+                } else {
+                    rect.center().y
+                };
+                *drop_target = Some(if pos.y < split_y {
+                    let y = rect.top() - BLOCK_GAP / 2.0;
+                    make_drop_target(
+                        payload,
+                        &current_path,
+                        idx,
+                        marker_rect(rect.left(), y, rect.width()),
+                    )
+                } else if has_body && pos.y < header_rect.bottom() + BLOCK_GAP {
+                    let left = header_rect.left() + 8.0;
+                    let y = header_rect.bottom() + BLOCK_GAP;
+                    make_drop_target(
+                        payload,
+                        &this_path,
+                        0,
+                        marker_rect(left, y, DROP_MARKER_MIN_WIDTH),
+                    )
+                } else {
+                    let y = rect.bottom() + BLOCK_GAP / 2.0;
+                    make_drop_target(
+                        payload,
+                        &current_path,
+                        idx + 1,
+                        marker_rect(rect.left(), y, rect.width()),
+                    )
                 });
-
-            if let Some(payload) = dropped_payload
-                && move_request.is_none()
-            {
-                handle_drop(
-                    payload.as_ref(),
-                    current_blocks,
-                    &current_path,
-                    idx,
-                    move_request,
-                );
             }
-
-            ui.add_space(BLOCK_GAP);
-        });
+        }
     }
 
-    render_bottom_drop_zone(ui, current_blocks, &current_path, move_request);
+    render_bottom_drop_zone(ui, current_blocks, &current_path, drop_target, dragged);
 }
 
 fn render_statement_header(
@@ -376,65 +453,46 @@ fn render_statement_header(
 
 fn render_bottom_drop_zone(
     ui: &mut egui::Ui,
-    current_blocks: &mut Vec<Statement>,
+    current_blocks: &[Statement],
     current_path: &[usize],
-    move_request: &mut Option<MoveRequest>,
+    drop_target: &mut Option<DropTarget>,
+    dragged: Option<(egui::Pos2, std::sync::Arc<DraggedBlock>)>,
 ) {
-    ui.scope(|ui| {
-        ui.visuals_mut().widgets.active.bg_fill = egui::Color32::from_white_alpha(50);
-        ui.visuals_mut().widgets.inactive.bg_fill = egui::Color32::TRANSPARENT;
-        ui.visuals_mut().widgets.active.bg_stroke = egui::Stroke::NONE;
+    let size = if current_path.is_empty() {
+        egui::vec2(ui.available_width(), ui.available_height().max(140.0))
+    } else {
+        egui::vec2(
+            ui.min_rect().width().max(NESTED_DROP_ZONE_MIN_WIDTH),
+            NESTED_DROP_ZONE_HEIGHT,
+        )
+    };
+    let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
 
-        // ネスト内はパネル幅いっぱいに広げず、中のブロック幅に合わせる
-        let size = if current_path.is_empty() {
-            egui::vec2(ui.available_width(), ui.available_height().max(140.0))
-        } else {
-            egui::vec2(
-                ui.min_rect().width().max(NESTED_DROP_ZONE_MIN_WIDTH),
-                NESTED_DROP_ZONE_HEIGHT,
-            )
-        };
-
-        let (_, bottom_payload) = ui.dnd_drop_zone::<DraggedBlock, _>(
-            egui::Frame::NONE.fill(egui::Color32::TRANSPARENT),
-            |ui| {
-                ui.allocate_response(size, egui::Sense::hover());
-            },
+    if current_path.is_empty() && current_blocks.is_empty() {
+        ui.painter().text(
+            rect.left_top() + egui::vec2(4.0, 8.0),
+            egui::Align2::LEFT_TOP,
+            "Drag blocks here",
+            egui::TextStyle::Body.resolve(ui.style()),
+            ui.visuals().weak_text_color(),
         );
+    }
 
-        if let Some(payload) = bottom_payload
-            && move_request.is_none()
-        {
-            handle_drop(
-                payload.as_ref(),
-                current_blocks,
-                current_path,
-                current_blocks.len(),
-                move_request,
-            );
-        }
-    });
-}
-
-fn handle_drop(
-    payload: &DraggedBlock,
-    current_blocks: &mut Vec<Statement>,
-    current_path: &[usize],
-    insert_idx: usize,
-    move_request: &mut Option<MoveRequest>,
-) {
-    match payload {
-        DraggedBlock::NewStatement(new_stmt) if insert_idx <= current_blocks.len() => {
-            current_blocks.insert(insert_idx, new_stmt.clone());
-        }
-        DraggedBlock::MoveStatement { path: src_path } if !is_ancestor(src_path, current_path) => {
-            *move_request = Some(MoveRequest {
-                src_path: src_path.clone(),
-                target_path: current_path.to_vec(),
-                insert_idx,
-            });
-        }
-        _ => {}
+    if drop_target.is_none()
+        && let Some((pos, payload)) = dragged
+        && rect.contains(pos)
+    {
+        let width = if current_path.is_empty() {
+            DROP_MARKER_MIN_WIDTH * 1.5
+        } else {
+            rect.width()
+        };
+        *drop_target = Some(make_drop_target(
+            &payload,
+            current_path,
+            current_blocks.len(),
+            marker_rect(rect.left(), rect.top() + DROP_MARKER_HEIGHT, width),
+        ));
     }
 }
 
@@ -502,20 +560,27 @@ pub fn expr_slot(
     expected_type: Option<Type>,
     type_ctx: &TypeContext,
 ) {
+    if !egui::DragAndDrop::has_payload_of_type::<DraggedExpr>(ui.ctx()) {
+        get_slot_frame().show(ui, |ui| {
+            ui.horizontal(|ui| expr_contents(ui, expr, slot_id, type_ctx));
+        });
+        return;
+    }
+
     ui.scope(|ui| {
         ui.visuals_mut().widgets.active.bg_fill = colors::SLOT_BG;
         ui.visuals_mut().widgets.inactive.bg_fill = colors::SLOT_BG;
-        ui.visuals_mut().widgets.active.bg_stroke = egui::Stroke::new(1.0, colors::TEXT_WHITE);
+        ui.visuals_mut().widgets.inactive.bg_stroke = egui::Stroke::new(1.0, colors::SLOT_BORDER);
+        ui.visuals_mut().widgets.active.bg_stroke = egui::Stroke::new(2.0, DROP_MARKER_FILL);
 
-        let (_, dropped_payload) = ui.dnd_drop_zone::<DraggedBlock, _>(get_slot_frame(), |ui| {
+        let (_, dropped_payload) = ui.dnd_drop_zone::<DraggedExpr, _>(get_slot_frame(), |ui| {
             ui.horizontal(|ui| expr_contents(ui, expr, slot_id, type_ctx));
         });
 
         if let Some(payload) = dropped_payload
-            && let DraggedBlock::NewExpr(new_expr) = payload.as_ref()
-            && is_type_compatible(expected_type, new_expr, type_ctx)
+            && is_type_compatible(expected_type, &payload.0, type_ctx)
         {
-            *expr = new_expr.clone();
+            *expr = payload.0.clone();
         }
     });
 }
