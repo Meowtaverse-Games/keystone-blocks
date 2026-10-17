@@ -27,6 +27,20 @@ pub fn show_vpl_contents(ui: &mut egui::Ui, state: &mut VplState) {
     let rect = ui.available_rect_before_wrap().intersect(ui.clip_rect());
     let available = rect.size();
 
+    if available.x < available.y {
+        show_stacked(ui, rect, state, &type_ctx);
+    } else {
+        show_side_by_side(ui, rect, state, &type_ctx);
+    }
+}
+
+fn show_side_by_side(
+    ui: &mut egui::Ui,
+    rect: egui::Rect,
+    state: &mut VplState,
+    type_ctx: &TypeContext,
+) {
+    let available = rect.size();
     let width_id = ui.make_persistent_id("vpl_palette_width");
     let measured = ui.data(|d| d.get_temp::<f32>(width_id));
     let palette_width = measured
@@ -44,7 +58,7 @@ pub fn show_vpl_contents(ui: &mut egui::Ui, state: &mut VplState) {
                     egui::Layout::top_down(egui::Align::Min),
                     |ui| {
                         ui.set_width(palette_width);
-                        render_palette_panel(ui, &mut state.blocks, &type_ctx)
+                        render_palette_panel(ui, &mut state.blocks, type_ctx, false)
                     },
                 )
                 .inner;
@@ -53,12 +67,39 @@ pub fn show_vpl_contents(ui: &mut egui::Ui, state: &mut VplState) {
             ui.separator();
 
             ui.vertical(|ui| {
-                render_program_panel(ui, &mut state.blocks, &type_ctx);
+                render_program_panel(ui, &mut state.blocks, type_ctx);
             });
         },
     );
 }
 
+fn show_stacked(ui: &mut egui::Ui, rect: egui::Rect, state: &mut VplState, type_ctx: &TypeContext) {
+    let palette_height =
+        (rect.height() * STACKED_PALETTE_HEIGHT_RATIO).max(STACKED_PALETTE_MIN_HEIGHT);
+
+    ui.scope_builder(
+        egui::UiBuilder::new()
+            .max_rect(rect)
+            .layout(egui::Layout::top_down(egui::Align::Min)),
+        |ui| {
+            ui.allocate_ui_with_layout(
+                egui::vec2(rect.width(), palette_height),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    ui.set_width(rect.width());
+                    render_palette_panel(ui, &mut state.blocks, type_ctx, true);
+                },
+            );
+
+            ui.separator();
+
+            render_program_panel(ui, &mut state.blocks, type_ctx);
+        },
+    );
+}
+
+const STACKED_PALETTE_HEIGHT_RATIO: f32 = 0.4;
+const STACKED_PALETTE_MIN_HEIGHT: f32 = 120.0;
 const PALETTE_EXTRA_WIDTH: f32 = 16.0;
 
 pub fn generate_code_from_state(state: &VplState) -> String {
@@ -189,6 +230,7 @@ fn render_palette_panel(
     ui: &mut egui::Ui,
     blocks: &mut Vec<Statement>,
     type_ctx: &TypeContext,
+    wrapped: bool,
 ) -> f32 {
     ui.heading("➕ Add Blocks");
     ui.separator();
@@ -213,26 +255,60 @@ fn render_palette_panel(
                         .show(ui, |ui| {
                             let mut item_width: f32 = 0.0;
 
-                            for (idx, entry) in entries.iter_mut().enumerate() {
-                                let block_id = egui::Id::new(("vpl_palette", idx));
-                                match entry {
+                            let mut idx = 0;
+                            while idx < entries.len() {
+                                match &entries[idx] {
                                     PaletteEntry::Section(text) => {
                                         ui.add_space(10.0);
                                         section_label(ui, text);
+                                        idx += 1;
                                     }
                                     PaletteEntry::SubSection(text) => {
                                         ui.add_space(4.0);
-                                        ui.label(egui::RichText::new(*text).weak().size(11.0));
+                                        ui.label(egui::RichText::new(*text).weak().small());
+                                        idx += 1;
                                     }
-                                    PaletteEntry::Stmt(stmt) => {
-                                        item_width = item_width.max(render::palette_block(
-                                            ui, stmt, block_id, blocks, type_ctx,
-                                        ));
-                                    }
-                                    PaletteEntry::Value(caption, expr) => {
-                                        item_width = item_width.max(render::palette_expr_block(
-                                            ui, *caption, expr, block_id, type_ctx,
-                                        ));
+                                    PaletteEntry::Stmt(_) | PaletteEntry::Value(..) => {
+                                        let start = idx;
+                                        while idx < entries.len()
+                                            && matches!(
+                                                entries[idx],
+                                                PaletteEntry::Stmt(_) | PaletteEntry::Value(..)
+                                            )
+                                        {
+                                            idx += 1;
+                                        }
+                                        let mut render_run = |ui: &mut egui::Ui| {
+                                            for (offset, entry) in
+                                                entries[start..idx].iter_mut().enumerate()
+                                            {
+                                                let entry_idx = start + offset;
+                                                let width_id =
+                                                    egui::Id::new(("vpl_palette_width", entry_idx));
+                                                if wrapped
+                                                    && let Some(prev_width) =
+                                                        ui.data(|d| d.get_temp::<f32>(width_id))
+                                                    && ui.cursor().min.x > ui.max_rect().min.x
+                                                    && ui.available_size_before_wrap().x
+                                                        < prev_width
+                                                {
+                                                    ui.end_row();
+                                                }
+                                                let width = render_palette_entry(
+                                                    ui, entry, entry_idx, blocks, type_ctx,
+                                                );
+                                                ui.data_mut(|d| d.insert_temp(width_id, width));
+                                                item_width = item_width.max(width);
+                                            }
+                                        };
+                                        if wrapped {
+                                            ui.horizontal_wrapped(|ui| {
+                                                ui.spacing_mut().item_spacing.y = 4.0;
+                                                render_run(ui);
+                                            });
+                                        } else {
+                                            render_run(ui);
+                                        }
                                     }
                                 }
                             }
@@ -260,6 +336,23 @@ fn render_palette_panel(
     item_width
 }
 
+fn render_palette_entry(
+    ui: &mut egui::Ui,
+    entry: &mut PaletteEntry,
+    idx: usize,
+    blocks: &mut Vec<Statement>,
+    type_ctx: &TypeContext,
+) -> f32 {
+    let block_id = egui::Id::new(("vpl_palette", idx));
+    match entry {
+        PaletteEntry::Stmt(stmt) => render::palette_block(ui, stmt, block_id, blocks, type_ctx),
+        PaletteEntry::Value(caption, expr) => {
+            render::palette_expr_block(ui, *caption, expr, block_id, type_ctx)
+        }
+        PaletteEntry::Section(_) | PaletteEntry::SubSection(_) => 0.0,
+    }
+}
+
 fn section_label(ui: &mut egui::Ui, text: &str) {
     ui.separator();
     ui.label(egui::RichText::new(text).weak());
@@ -269,7 +362,7 @@ fn render_program_panel(ui: &mut egui::Ui, blocks: &mut Vec<Statement>, type_ctx
     ui.heading("📝 Current Program");
     ui.separator();
 
-    egui::ScrollArea::vertical()
+    egui::ScrollArea::both()
         .id_salt("right_program_scroll")
         .show(ui, |ui| {
             let mut move_request = None;

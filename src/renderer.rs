@@ -103,8 +103,10 @@ fn draggable_block<R>(
 
         if let Some(pointer_pos) = ui.ctx().pointer_interact_pos() {
             let delta = pointer_pos - inner.response.rect.center();
-            ui.ctx()
-                .transform_layer_shapes(layer_id, egui::emath::TSTransform::from_translation(delta));
+            ui.ctx().transform_layer_shapes(
+                layer_id,
+                egui::emath::TSTransform::from_translation(delta),
+            );
         }
 
         inner
@@ -158,16 +160,9 @@ pub fn palette_block(
     apply_block_spacing(ui);
     let payload = DraggedBlock::NewStatement(stmt.clone());
 
-    let response = statement_block(
-        ui,
-        stmt,
-        block_id,
-        payload,
-        type_ctx,
-        |ui, _| {
-            ui.allocate_space(egui::vec2(40.0, 8.0));
-        },
-    );
+    let response = statement_block(ui, stmt, block_id, payload, type_ctx, |ui, _| {
+        ui.allocate_space(egui::vec2(40.0, 8.0));
+    });
 
     if response.clicked() {
         target_blocks.push(stmt.clone());
