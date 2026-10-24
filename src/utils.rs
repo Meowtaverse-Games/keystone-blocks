@@ -83,43 +83,88 @@ fn callee_command(callee: &Callee) -> Option<&'static str> {
 }
 
 pub fn is_stmt_allowed(stmt: &Statement, allowed: Option<&HashSet<String>>) -> bool {
-    let Some(allowed) = allowed else {
-        return true;
-    };
-    if stmt_command(stmt).is_some_and(|c| !allowed.contains(c)) {
-        return false;
-    }
-    match stmt {
-        Statement::Loop(e, body) | Statement::While(e, body) | Statement::If(e, body) => {
-            is_expr_allowed(e, Some(allowed))
-                && body.iter().all(|s| is_stmt_allowed(s, Some(allowed)))
-        }
-        Statement::Print(e)
-        | Statement::Move(e)
-        | Statement::Turn(e)
-        | Statement::Dig(e)
-        | Statement::Place(e)
-        | Statement::Sleep(e)
-        | Statement::Let(_, e)
-        | Statement::Send(e)
-        | Statement::Receive(e) => is_expr_allowed(e, Some(allowed)),
-    }
+    disallowed_in_program(std::slice::from_ref(stmt), allowed).is_empty()
 }
 
 pub fn is_expr_allowed(expr: &Expr, allowed: Option<&HashSet<String>>) -> bool {
-    let Some(allowed) = allowed else {
-        return true;
-    };
+    let mut found = Vec::new();
+    if let Some(allowed) = allowed {
+        collect_disallowed_in_expr(expr, allowed, &mut found);
+    }
+    found.is_empty()
+}
+
+pub fn disallowed_in_stmt(
+    stmt: &Statement,
+    allowed: Option<&HashSet<String>>,
+) -> Vec<&'static str> {
+    let mut found = Vec::new();
+    if let Some(allowed) = allowed {
+        if let Some(command) = stmt_command(stmt)
+            && !allowed.contains(command)
+        {
+            found.push(command);
+        }
+        let expr = match stmt {
+            Statement::Loop(e, _)
+            | Statement::While(e, _)
+            | Statement::If(e, _)
+            | Statement::Print(e)
+            | Statement::Move(e)
+            | Statement::Turn(e)
+            | Statement::Dig(e)
+            | Statement::Place(e)
+            | Statement::Sleep(e)
+            | Statement::Let(_, e)
+            | Statement::Send(e)
+            | Statement::Receive(e) => e,
+        };
+        collect_disallowed_in_expr(expr, allowed, &mut found);
+        found.sort_unstable();
+        found.dedup();
+    }
+    found
+}
+
+pub fn disallowed_in_program(
+    stmts: &[Statement],
+    allowed: Option<&HashSet<String>>,
+) -> Vec<&'static str> {
+    let mut found = Vec::new();
+    for stmt in stmts {
+        found.extend(disallowed_in_stmt(stmt, allowed));
+        if let Statement::Loop(_, body) | Statement::While(_, body) | Statement::If(_, body) = stmt
+        {
+            found.extend(disallowed_in_program(body, allowed));
+        }
+    }
+    found.sort_unstable();
+    found.dedup();
+    found
+}
+
+fn collect_disallowed_in_expr(
+    expr: &Expr,
+    allowed: &HashSet<String>,
+    found: &mut Vec<&'static str>,
+) {
     match expr {
         Expr::Call { callee, args } => {
-            callee_command(callee).is_none_or(|c| allowed.contains(c))
-                && args.iter().all(|a| is_expr_allowed(a, Some(allowed)))
+            if let Some(command) = callee_command(callee)
+                && !allowed.contains(command)
+            {
+                found.push(command);
+            }
+            for arg in args {
+                collect_disallowed_in_expr(arg, allowed, found);
+            }
         }
-        Expr::Unary { exp, .. } => is_expr_allowed(exp, Some(allowed)),
+        Expr::Unary { exp, .. } => collect_disallowed_in_expr(exp, allowed, found),
         Expr::Binary { lhs, rhs, .. } => {
-            is_expr_allowed(lhs, Some(allowed)) && is_expr_allowed(rhs, Some(allowed))
+            collect_disallowed_in_expr(lhs, allowed, found);
+            collect_disallowed_in_expr(rhs, allowed, found);
         }
-        _ => true,
+        _ => {}
     }
 }
 

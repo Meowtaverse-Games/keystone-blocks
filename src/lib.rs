@@ -78,7 +78,12 @@ fn show_side_by_side(
             ui.separator();
 
             ui.vertical(|ui| {
-                render_program_panel(ui, &mut state.blocks, type_ctx);
+                render_program_panel(
+                    ui,
+                    &mut state.blocks,
+                    state.allowed_commands.as_ref(),
+                    type_ctx,
+                );
             });
         },
     );
@@ -120,7 +125,12 @@ fn show_stacked(ui: &mut egui::Ui, rect: egui::Rect, state: &mut VplState, type_
                 ui.data_mut(|d| d.insert_temp(ratio_id, new_height / rect.height()));
             }
 
-            render_program_panel(ui, &mut state.blocks, type_ctx);
+            render_program_panel(
+                ui,
+                &mut state.blocks,
+                state.allowed_commands.as_ref(),
+                type_ctx,
+            );
         },
     );
 }
@@ -169,6 +179,10 @@ pub fn show_vpl_for_code(
     if let Some(message) = state.write_error() {
         show_write_error(ui, message);
     }
+    let disallowed = disallowed_in_program(&state.blocks, state.allowed_commands.as_ref());
+    if !disallowed.is_empty() {
+        show_disallowed_warning(ui, &disallowed);
+    }
 
     let had_error = state.write_error().is_some();
     show_vpl_contents(ui, state);
@@ -189,6 +203,18 @@ fn show_write_error(ui: &mut egui::Ui, message: &str) {
         .strong(),
     )
     .on_hover_text(egui::RichText::new(message).monospace());
+    ui.add_space(4.0);
+}
+
+fn show_disallowed_warning(ui: &mut egui::Ui, commands: &[&str]) {
+    ui.label(
+        egui::RichText::new(format!(
+            "⚠ This stone can't use: {}. The program will fail to run until you remove the blocks outlined in red.",
+            commands.join(", ")
+        ))
+        .color(colors::ERROR)
+        .strong(),
+    );
     ui.add_space(4.0);
 }
 
@@ -508,13 +534,18 @@ fn section_label(ui: &mut egui::Ui, text: &str) {
     ui.label(egui::RichText::new(text).weak());
 }
 
-fn render_program_panel(ui: &mut egui::Ui, blocks: &mut Vec<Statement>, type_ctx: &TypeContext) {
+fn render_program_panel(
+    ui: &mut egui::Ui,
+    blocks: &mut Vec<Statement>,
+    allowed: Option<&HashSet<String>>,
+    type_ctx: &TypeContext,
+) {
     egui::ScrollArea::both()
         .id_salt("right_program_scroll")
         .show(ui, |ui| {
             let mut drop_target = None;
 
-            render::block_list(ui, blocks, Vec::new(), &mut drop_target, type_ctx);
+            render::block_list(ui, blocks, Vec::new(), &mut drop_target, type_ctx, allowed);
 
             if let Some(target) = drop_target
                 && let Some(marker) = target.marker
@@ -644,6 +675,32 @@ mod tests {
             entries.last(),
             Some(PaletteEntry::Section(_) | PaletteEntry::SubSection(_))
         ));
+    }
+
+    #[test]
+    fn reports_only_the_blocks_that_use_disallowed_commands() {
+        let only_move = allowed(&["move"]);
+        let program = keystone_lang::parse(
+            "loop 3\n  dig down\n  move left\nend\nif is_touched()\n  sleep 1.0\nend",
+        )
+        .unwrap();
+
+        assert!(disallowed_in_stmt(&program[0], Some(&only_move)).is_empty());
+        let Statement::Loop(_, body) = &program[0] else {
+            unreachable!()
+        };
+        assert_eq!(disallowed_in_stmt(&body[0], Some(&only_move)), ["dig"]);
+        assert!(disallowed_in_stmt(&body[1], Some(&only_move)).is_empty());
+        assert_eq!(
+            disallowed_in_stmt(&program[1], Some(&only_move)),
+            ["is_touched"]
+        );
+
+        assert_eq!(
+            disallowed_in_program(&program, Some(&only_move)),
+            ["dig", "is_touched", "sleep"]
+        );
+        assert!(disallowed_in_program(&program, None).is_empty());
     }
 
     #[test]

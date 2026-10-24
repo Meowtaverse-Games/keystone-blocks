@@ -1,7 +1,8 @@
 use crate::code::{expr_value_problem, var_name_problem};
-use crate::utils::get_stmt_info;
+use crate::utils::{disallowed_in_stmt, get_stmt_info};
 use crate::{colorizer::*, utils::is_type_compatible};
 use bevy_egui::egui;
+use std::collections::HashSet;
 
 use keystone_lang::{Callee, Direction, Expr, Op, Statement, Type, TypeContext, UnaryOp};
 
@@ -274,6 +275,7 @@ pub fn block_list(
     current_path: Vec<usize>,
     drop_target: &mut Option<DropTarget>,
     type_ctx: &TypeContext,
+    allowed: Option<&HashSet<String>>,
 ) {
     ui.spacing_mut().item_spacing.y = 0.0;
     apply_block_spacing(ui);
@@ -301,11 +303,20 @@ pub fn block_list(
             },
             type_ctx,
             |ui, children| {
-                block_list(ui, children, this_path.clone(), drop_target, type_ctx);
+                block_list(
+                    ui,
+                    children,
+                    this_path.clone(),
+                    drop_target,
+                    type_ctx,
+                    allowed,
+                );
             },
         );
         let rect = response.rect;
         ui.add_space(BLOCK_GAP);
+
+        mark_disallowed(ui, stmt, header_rect, block_id, allowed);
 
         if drop_target.is_none()
             && let Some((pos, payload)) = &dragged
@@ -351,6 +362,28 @@ pub fn block_list(
     }
 
     render_bottom_drop_zone(ui, current_blocks, &current_path, drop_target, dragged);
+}
+
+fn mark_disallowed(
+    ui: &egui::Ui,
+    stmt: &Statement,
+    header_rect: egui::Rect,
+    block_id: egui::Id,
+    allowed: Option<&HashSet<String>>,
+) {
+    let commands = disallowed_in_stmt(stmt, allowed);
+    if commands.is_empty() {
+        return;
+    }
+    let rect = header_rect.expand(4.0);
+    ui.painter().rect_stroke(
+        rect,
+        egui::CornerRadius::same(6),
+        egui::Stroke::new(2.0, colors::ERROR),
+        egui::StrokeKind::Outside,
+    );
+    ui.interact(rect, block_id.with("disallowed"), egui::Sense::hover())
+        .on_hover_text(format!("This stone can't use: {}", commands.join(", ")));
 }
 
 fn render_statement_header(
