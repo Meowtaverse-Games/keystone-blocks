@@ -5,6 +5,8 @@ mod renderer;
 mod structs;
 mod sync;
 mod utils;
+use std::collections::HashSet;
+
 use bevy::prelude::*;
 use bevy_egui::egui::{self, Color32};
 use code::*;
@@ -61,7 +63,13 @@ fn show_side_by_side(
                     egui::Layout::top_down(egui::Align::Min),
                     |ui| {
                         ui.set_width(palette_width);
-                        render_palette_panel(ui, &mut state.blocks, type_ctx, false)
+                        render_palette_panel(
+                            ui,
+                            &mut state.blocks,
+                            state.allowed_commands.as_ref(),
+                            type_ctx,
+                            false,
+                        )
                     },
                 )
                 .inner;
@@ -96,7 +104,13 @@ fn show_stacked(ui: &mut egui::Ui, rect: egui::Rect, state: &mut VplState, type_
                 |ui| {
                     ui.set_width(rect.width());
                     ui.set_height(palette_height);
-                    render_palette_panel(ui, &mut state.blocks, type_ctx, true);
+                    render_palette_panel(
+                        ui,
+                        &mut state.blocks,
+                        state.allowed_commands.as_ref(),
+                        type_ctx,
+                        true,
+                    );
                 },
             );
 
@@ -134,12 +148,17 @@ fn horizontal_splitter(ui: &mut egui::Ui, width: f32) -> egui::Response {
 const STACKED_PALETTE_HEIGHT_RATIO: f32 = 0.4;
 const STACKED_MIN_HEIGHT: f32 = 80.0;
 const SPLITTER_HEIGHT: f32 = 12.0;
+
 pub fn show_vpl_for_code(
     ui: &mut egui::Ui,
     state: &mut VplState,
     source_id: usize,
     code: &mut String,
+    allowed_commands: Option<&HashSet<String>>,
 ) -> bool {
+    if state.allowed_commands.as_ref() != allowed_commands {
+        state.allowed_commands = allowed_commands.cloned();
+    }
     state.sync_from_code(source_id, code);
 
     if let CodeSyncStatus::SyntaxError(message) = state.sync_status() {
@@ -211,10 +230,20 @@ enum PaletteEntry {
     Value(Option<&'static str>, Expr),
 }
 
-fn default_palette() -> Vec<PaletteEntry> {
+fn default_palette(allowed: Option<&HashSet<String>>) -> Vec<PaletteEntry> {
     use PaletteEntry::*;
 
-    vec![
+    let touched = Expr::Call {
+        callee: Callee::IsTouched,
+        args: vec![],
+    };
+    let if_cond = if is_expr_allowed(&touched, allowed) {
+        touched
+    } else {
+        Expr::Boolean(true)
+    };
+
+    let entries = vec![
         Stmt(Statement::Move(Expr::Direction(Direction::Right))),
         Stmt(Statement::Turn(Expr::Direction(Direction::Left))),
         Stmt(Statement::Dig(Expr::Direction(Direction::Up))),
@@ -226,13 +255,7 @@ fn default_palette() -> Vec<PaletteEntry> {
         Stmt(Statement::Send(Expr::String("signal".to_string()))),
         Stmt(Statement::Receive(Expr::String("signal".to_string()))),
         Section("Nest Blocks"),
-        Stmt(Statement::If(
-            Expr::Call {
-                callee: Callee::IsTouched,
-                args: vec![],
-            },
-            Vec::new(),
-        )),
+        Stmt(Statement::If(if_cond, Vec::new())),
         Stmt(Statement::Loop(Expr::Uint(3), Vec::new())),
         Stmt(Statement::While(Expr::Boolean(true), Vec::new())),
         Section("Value Blocks (Expr)"),
@@ -312,19 +335,57 @@ fn default_palette() -> Vec<PaletteEntry> {
                 args: vec![Box::new(Expr::Direction(Direction::Forward))],
             },
         ),
-    ]
+    ];
+
+    let entries = entries.into_iter().filter(|entry| match entry {
+        Stmt(stmt) => is_stmt_allowed(stmt, allowed),
+        Value(_, expr) => is_expr_allowed(expr, allowed),
+        Section(_) | SubSection(_) => true,
+    });
+    drop_empty_headings(entries.collect())
+}
+
+fn drop_empty_headings(entries: Vec<PaletteEntry>) -> Vec<PaletteEntry> {
+    use PaletteEntry::*;
+
+    let mut result: Vec<PaletteEntry> = Vec::with_capacity(entries.len());
+    for entry in entries {
+        match entry {
+            Section(_) => {
+                while matches!(result.last(), Some(Section(_) | SubSection(_))) {
+                    result.pop();
+                }
+            }
+            SubSection(_) => {
+                if matches!(result.last(), Some(SubSection(_))) {
+                    result.pop();
+                }
+            }
+            Stmt(_) | Value(..) => {}
+        }
+        result.push(entry);
+    }
+    while matches!(result.last(), Some(Section(_) | SubSection(_))) {
+        result.pop();
+    }
+    result
 }
 
 fn render_palette_panel(
     ui: &mut egui::Ui,
     blocks: &mut Vec<Statement>,
+    allowed: Option<&HashSet<String>>,
     type_ctx: &TypeContext,
     wrapped: bool,
 ) -> f32 {
-    let entries_id = ui.make_persistent_id("vpl_palette_entries");
+    let mut allowed_key = allowed.map(|set| set.iter().cloned().collect::<Vec<_>>());
+    if let Some(key) = &mut allowed_key {
+        key.sort();
+    }
+    let entries_id = ui.make_persistent_id(("vpl_palette_entries", allowed_key));
     let mut entries = ui
         .data(|d| d.get_temp::<Vec<PaletteEntry>>(entries_id))
-        .unwrap_or_else(default_palette);
+        .unwrap_or_else(|| default_palette(allowed));
 
     let item_width = ui
         .scope(|ui| {
@@ -370,7 +431,7 @@ fn render_palette_panel(
                                             {
                                                 let entry_idx = start + offset;
                                                 let width_id =
-                                                    egui::Id::new(("vpl_palette_width", entry_idx));
+                                                    entries_id.with(("width", entry_idx));
                                                 if wrapped
                                                     && let Some(prev_width) =
                                                         ui.data(|d| d.get_temp::<f32>(width_id))
@@ -381,7 +442,11 @@ fn render_palette_panel(
                                                     ui.end_row();
                                                 }
                                                 let width = render_palette_entry(
-                                                    ui, entry, entry_idx, blocks, type_ctx,
+                                                    ui,
+                                                    entry,
+                                                    entries_id.with(entry_idx),
+                                                    blocks,
+                                                    type_ctx,
                                                 );
                                                 ui.data_mut(|d| d.insert_temp(width_id, width));
                                                 item_width = item_width.max(width);
@@ -425,11 +490,10 @@ fn render_palette_panel(
 fn render_palette_entry(
     ui: &mut egui::Ui,
     entry: &mut PaletteEntry,
-    idx: usize,
+    block_id: egui::Id,
     blocks: &mut Vec<Statement>,
     type_ctx: &TypeContext,
 ) -> f32 {
-    let block_id = egui::Id::new(("vpl_palette", idx));
     match entry {
         PaletteEntry::Stmt(stmt) => render::palette_block(ui, stmt, block_id, blocks, type_ctx),
         PaletteEntry::Value(caption, expr) => {
@@ -514,5 +578,91 @@ fn handle_move_request(blocks: &mut Vec<Statement>, req: MoveRequest) {
         }
 
         insert_statement_at_path(blocks, &target_path, insert_idx, moved_block);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn allowed(commands: &[&str]) -> HashSet<String> {
+        commands.iter().map(|c| c.to_string()).collect()
+    }
+
+    fn palette_code(allowed: Option<&HashSet<String>>) -> Vec<String> {
+        default_palette(allowed)
+            .into_iter()
+            .filter_map(|entry| match entry {
+                PaletteEntry::Stmt(stmt) => Some(statements_to_string(&[stmt], 0)),
+                PaletteEntry::Value(_, expr) => Some(expr.to_code()),
+                PaletteEntry::Section(_) | PaletteEntry::SubSection(_) => None,
+            })
+            .collect()
+    }
+
+    fn uses(code: &[String], word: &str) -> bool {
+        code.iter().any(|c| c.contains(word))
+    }
+
+    #[test]
+    fn unrestricted_palette_shows_everything() {
+        let code = palette_code(None);
+        for word in ["move", "sleep", "dig", "place", "is_touched", "is_empty"] {
+            assert!(uses(&code, word), "{word} is missing");
+        }
+    }
+
+    #[test]
+    fn palette_hides_commands_the_stone_cannot_use() {
+        let code = palette_code(Some(&allowed(&["move", "sleep"])));
+        assert!(uses(&code, "move") && uses(&code, "sleep"));
+        for word in ["dig", "place", "is_touched", "is_empty"] {
+            assert!(!uses(&code, word), "{word} should be hidden");
+        }
+        for word in ["turn", "print", "if true", "loop", "while", "rand("] {
+            assert!(uses(&code, word), "{word} is missing");
+        }
+        let code = palette_code(Some(&allowed(&["move", "is_touched", "is_empty", "place"])));
+        assert!(uses(&code, "place") && uses(&code, "if is_touched()"));
+        assert!(!uses(&code, "dig") && !uses(&code, "sleep"));
+    }
+
+    #[test]
+    fn palette_has_no_empty_headings() {
+        let entries = default_palette(Some(&allowed(&[])));
+        for pair in entries.windows(2) {
+            let heading_then_heading = matches!(pair[0], PaletteEntry::Section(_))
+                && matches!(pair[1], PaletteEntry::Section(_));
+            let sub_then_heading = matches!(pair[0], PaletteEntry::SubSection(_))
+                && matches!(
+                    pair[1],
+                    PaletteEntry::Section(_) | PaletteEntry::SubSection(_)
+                );
+            assert!(!heading_then_heading && !sub_then_heading);
+        }
+        assert!(!matches!(
+            entries.last(),
+            Some(PaletteEntry::Section(_) | PaletteEntry::SubSection(_))
+        ));
+    }
+
+    #[test]
+    fn nested_blocks_are_checked() {
+        let only_move = allowed(&["move"]);
+        let dig_in_loop = Statement::Loop(
+            Expr::Uint(3),
+            vec![Statement::Dig(Expr::Direction(Direction::Down))],
+        );
+        assert!(!is_stmt_allowed(&dig_in_loop, Some(&only_move)));
+        assert!(is_stmt_allowed(&dig_in_loop, None));
+
+        let not_empty = Expr::Unary {
+            op: UnaryOp::Not,
+            exp: Box::new(Expr::Call {
+                callee: Callee::IsEmpty,
+                args: vec![Box::new(Expr::Direction(Direction::Left))],
+            }),
+        };
+        assert!(!is_expr_allowed(&not_empty, Some(&only_move)));
     }
 }

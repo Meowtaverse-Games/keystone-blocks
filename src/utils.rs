@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use keystone_lang::{Callee, Expr, Op, Statement, Type, TypeContext, expr_check};
 
 use crate::structs::InferResult;
@@ -60,6 +62,65 @@ pub fn is_ancestor(ancestor_path: &[usize], target_path: &[usize]) -> bool {
         return false;
     }
     target_path.starts_with(ancestor_path)
+}
+
+fn stmt_command(stmt: &Statement) -> Option<&'static str> {
+    match stmt {
+        Statement::Move(_) => Some("move"),
+        Statement::Sleep(_) => Some("sleep"),
+        Statement::Dig(_) => Some("dig"),
+        Statement::Place(_) => Some("place"),
+        _ => None,
+    }
+}
+
+fn callee_command(callee: &Callee) -> Option<&'static str> {
+    match callee {
+        Callee::IsTouched => Some("is_touched"),
+        Callee::IsEmpty => Some("is_empty"),
+        Callee::Rand => None,
+    }
+}
+
+pub fn is_stmt_allowed(stmt: &Statement, allowed: Option<&HashSet<String>>) -> bool {
+    let Some(allowed) = allowed else {
+        return true;
+    };
+    if stmt_command(stmt).is_some_and(|c| !allowed.contains(c)) {
+        return false;
+    }
+    match stmt {
+        Statement::Loop(e, body) | Statement::While(e, body) | Statement::If(e, body) => {
+            is_expr_allowed(e, Some(allowed))
+                && body.iter().all(|s| is_stmt_allowed(s, Some(allowed)))
+        }
+        Statement::Print(e)
+        | Statement::Move(e)
+        | Statement::Turn(e)
+        | Statement::Dig(e)
+        | Statement::Place(e)
+        | Statement::Sleep(e)
+        | Statement::Let(_, e)
+        | Statement::Send(e)
+        | Statement::Receive(e) => is_expr_allowed(e, Some(allowed)),
+    }
+}
+
+pub fn is_expr_allowed(expr: &Expr, allowed: Option<&HashSet<String>>) -> bool {
+    let Some(allowed) = allowed else {
+        return true;
+    };
+    match expr {
+        Expr::Call { callee, args } => {
+            callee_command(callee).is_none_or(|c| allowed.contains(c))
+                && args.iter().all(|a| is_expr_allowed(a, Some(allowed)))
+        }
+        Expr::Unary { exp, .. } => is_expr_allowed(exp, Some(allowed)),
+        Expr::Binary { lhs, rhs, .. } => {
+            is_expr_allowed(lhs, Some(allowed)) && is_expr_allowed(rhs, Some(allowed))
+        }
+        _ => true,
+    }
 }
 
 pub fn get_stmt_info(stmt: &Statement) -> (&'static str, &'static str) {
