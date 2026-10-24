@@ -1,4 +1,4 @@
-use keystone_lang::{Direction, Expr, Op, Statement, UnaryOp};
+use keystone_lang::{Direction, Expr, Op, Statement, UnaryOp, parse};
 
 pub trait ToCode {
     fn to_code(&self) -> String;
@@ -98,6 +98,32 @@ impl ToCode for Expr {
         }
     }
 }
+
+pub fn expr_value_problem(expr: &Expr) -> Option<&'static str> {
+    if let Expr::String(s) = expr
+        && s.contains('"')
+    {
+        return Some("Text can't contain \".");
+    }
+    let code = format!("print {}", expr.to_code());
+    if matches!(parse(&code), Ok(stmts) if stmts == [Statement::Print(expr.clone())]) {
+        return None;
+    }
+    Some(match expr {
+        Expr::Var(_) => NAME_PROBLEM,
+        _ => "This value can't be written as code.",
+    })
+}
+
+pub fn var_name_problem(name: &str) -> Option<&'static str> {
+    let code = format!("{name} = 0");
+    match parse(&code) {
+        Ok(stmts) if stmts == [Statement::Let(name.to_string(), Expr::Uint(0))] => None,
+        _ => Some(NAME_PROBLEM),
+    }
+}
+
+const NAME_PROBLEM: &str = "Use letters, digits and _ for names (not starting with a digit), and avoid reserved words such as if, move or forward.";
 
 pub fn statements_to_string(statements: &[Statement], indent_level: usize) -> String {
     let mut code = String::new();
@@ -269,6 +295,24 @@ mod tests {
             ),
             "rand(x + 1, 10) * 2",
         );
+    }
+
+    #[test]
+    fn detects_values_that_cannot_be_written() {
+        assert!(expr_value_problem(&Expr::String("hello \"world\"".to_string())).is_some());
+        assert!(expr_value_problem(&Expr::String("hello world".to_string())).is_none());
+        assert!(expr_value_problem(&var("my_x1")).is_none());
+        assert!(expr_value_problem(&var("")).is_some());
+        assert!(expr_value_problem(&var("my x")).is_some());
+        assert!(expr_value_problem(&var("1x")).is_some());
+        assert!(expr_value_problem(&var("forward")).is_some());
+        assert!(expr_value_problem(&var("if")).is_some());
+        assert!(expr_value_problem(&Expr::Float(1.5)).is_none());
+        assert!(expr_value_problem(&Expr::Float(-1.5)).is_some());
+
+        assert!(var_name_problem("x").is_none());
+        assert!(var_name_problem("my x").is_some());
+        assert!(var_name_problem("").is_some());
     }
 
     #[test]

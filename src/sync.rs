@@ -17,6 +17,7 @@ pub(crate) struct CodeSync {
     code: String,
     generated: String,
     status: CodeSyncStatus,
+    write_error: Option<String>,
 }
 
 impl VplState {
@@ -24,6 +25,7 @@ impl VplState {
         let sync = &mut self.sync;
         sync.source_id = Some(source_id);
         sync.code = code.to_string();
+        sync.write_error = None;
 
         match parse(code) {
             Ok(statements) => {
@@ -43,6 +45,10 @@ impl VplState {
         &self.sync.status
     }
 
+    pub fn write_error(&self) -> Option<&str> {
+        self.sync.write_error.as_deref()
+    }
+
     pub(crate) fn sync_from_code(&mut self, source_id: usize, code: &str) {
         if self.sync.source_id != Some(source_id) || self.sync.code != code {
             self.load_code(source_id, code);
@@ -56,8 +62,20 @@ impl VplState {
 
         let generated = statements_to_string(&self.blocks, 0);
         if generated == self.sync.generated {
+            self.sync.write_error = None;
             return false;
         }
+
+        let check = match parse(&generated) {
+            Ok(parsed) if parsed == self.blocks => Ok(()),
+            Ok(_) => Err("The generated code doesn't match the blocks.".to_string()),
+            Err(err) => Err(format_error(&err)),
+        };
+        if let Err(message) = check {
+            self.sync.write_error = Some(message);
+            return false;
+        }
+        self.sync.write_error = None;
 
         *code = generated.clone();
         self.sync.code = generated.clone();
@@ -186,6 +204,51 @@ mod tests {
                 Statement::Turn(Expr::Direction(Direction::Right)),
             ]
         );
+    }
+
+    #[test]
+    fn broken_blocks_are_not_written_back() {
+        let mut state = VplState::default();
+        let mut code = "print \"hello\"".to_string();
+        state.sync_from_code(0, &code);
+
+        state.blocks[0] = Statement::Print(Expr::String("hello \"world\"".to_string()));
+        assert!(!state.write_back(&mut code));
+        assert_eq!(code, "print \"hello\"");
+        assert!(state.write_error().is_some());
+
+        state.blocks[0] = Statement::Print(Expr::String("hello world".to_string()));
+        assert!(state.write_back(&mut code));
+        assert_eq!(code, "print \"hello world\"\n");
+        assert!(state.write_error().is_none());
+    }
+
+    #[test]
+    fn blocks_that_read_back_differently_are_not_written_back() {
+        let mut state = VplState::default();
+        let mut code = "print x".to_string();
+        state.sync_from_code(0, &code);
+
+        state.blocks[0] = Statement::Print(Expr::Var("forward".to_string()));
+        assert!(!state.write_back(&mut code));
+        assert_eq!(code, "print x");
+        assert!(state.write_error().is_some());
+    }
+
+    #[test]
+    fn reverting_broken_edit_clears_warning() {
+        let mut state = VplState::default();
+        let mut code = "x = 1".to_string();
+        state.sync_from_code(0, &code);
+
+        state.blocks[0] = Statement::Let("my x".to_string(), Expr::Uint(1));
+        assert!(!state.write_back(&mut code));
+        assert!(state.write_error().is_some());
+
+        state.blocks[0] = Statement::Let("x".to_string(), Expr::Uint(1));
+        assert!(!state.write_back(&mut code));
+        assert!(state.write_error().is_none());
+        assert_eq!(code, "x = 1");
     }
 
     #[test]

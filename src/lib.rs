@@ -8,6 +8,7 @@ mod utils;
 use bevy::prelude::*;
 use bevy_egui::egui::{self, Color32};
 use code::*;
+use colorizer::colors;
 use keystone_lang::{Callee, Direction, Expr, Op, Statement, TypeContext, UnaryOp};
 use renderer as render;
 pub use structs::VplState;
@@ -146,8 +147,30 @@ pub fn show_vpl_for_code(
         return false;
     }
 
+    if let Some(message) = state.write_error() {
+        show_write_error(ui, message);
+    }
+
+    let had_error = state.write_error().is_some();
     show_vpl_contents(ui, state);
-    state.write_back(code)
+    let written = state.write_back(code);
+    if had_error != state.write_error().is_some() {
+        ui.ctx().request_repaint();
+    }
+    written
+}
+
+fn show_write_error(ui: &mut egui::Ui, message: &str) {
+    ui.label(
+        egui::RichText::new(
+            "⚠ Some blocks can't be turned into code, so your changes aren't saved yet. \
+             Fix the fields outlined in red.",
+        )
+        .color(colors::ERROR)
+        .strong(),
+    )
+    .on_hover_text(egui::RichText::new(message).monospace());
+    ui.add_space(4.0);
 }
 
 fn show_syntax_error(ui: &mut egui::Ui, message: &str) {

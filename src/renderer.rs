@@ -1,3 +1,4 @@
+use crate::code::{expr_value_problem, var_name_problem};
 use crate::utils::get_stmt_info;
 use crate::{colorizer::*, utils::is_type_compatible};
 use bevy_egui::egui;
@@ -64,7 +65,7 @@ fn fit_text_width(ui: &egui::Ui, text: &str, min_width: f32) -> f32 {
     width.max(min_width) + 8.0
 }
 
-fn fitted_text_edit(ui: &mut egui::Ui, text: &mut String) {
+fn fitted_text_edit(ui: &mut egui::Ui, text: &mut String) -> egui::Response {
     let width = fit_text_width(ui, text, 20.0);
     ui.add(
         egui::TextEdit::singleline(text)
@@ -72,7 +73,19 @@ fn fitted_text_edit(ui: &mut egui::Ui, text: &mut String) {
             .frame(egui::Frame::NONE)
             .desired_width(width)
             .margin(egui::Margin::symmetric(4, 1)),
-    );
+    )
+}
+
+fn mark_problem(ui: &egui::Ui, response: egui::Response, problem: Option<&str>) {
+    if let Some(problem) = problem {
+        ui.painter().rect_stroke(
+            response.rect.expand(1.0),
+            egui::CornerRadius::same(4),
+            egui::Stroke::new(2.0, colors::ERROR),
+            egui::StrokeKind::Outside,
+        );
+        response.on_hover_text(problem);
+    }
 }
 
 fn unselectable_label(ui: &mut egui::Ui, text: egui::RichText) -> egui::Response {
@@ -406,7 +419,8 @@ fn render_statement_header(
         }
         Statement::Let(name, expr) => {
             get_slot_frame().show(ui, |ui| {
-                fitted_text_edit(ui, name);
+                let response = fitted_text_edit(ui, name);
+                mark_problem(ui, response, var_name_problem(name));
             });
             unselectable_label(
                 ui,
@@ -588,7 +602,8 @@ pub fn expr_slot(
 fn expr_contents(ui: &mut egui::Ui, expr: &mut Expr, slot_id: egui::Id, type_ctx: &TypeContext) {
     match expr {
         Expr::Var(name) => {
-            fitted_text_edit(ui, name);
+            let response = fitted_text_edit(ui, name);
+            mark_problem(ui, response, expr_value_problem(expr));
         }
 
         Expr::Uint(v) => {
@@ -599,11 +614,13 @@ fn expr_contents(ui: &mut egui::Ui, expr: &mut Expr, slot_id: egui::Id, type_ctx
         }
 
         Expr::Float(v) => {
-            ui.add(egui::DragValue::new(v).speed(0.1));
+            let response = ui.add(egui::DragValue::new(v).speed(0.1).range(0.0..=f64::MAX));
+            mark_problem(ui, response, expr_value_problem(expr));
         }
 
         Expr::String(s) => {
-            fitted_text_edit(ui, s);
+            let response = fitted_text_edit(ui, s);
+            mark_problem(ui, response, expr_value_problem(expr));
         }
 
         Expr::Boolean(b) => {

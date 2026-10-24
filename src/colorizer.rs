@@ -14,6 +14,7 @@ pub mod colors {
     pub const SLOT_BG: Color32 = Color32::from_rgb(35, 40, 50);
     pub const SLOT_BORDER: Color32 = Color32::from_rgb(20, 25, 30);
     pub const TEXT_WHITE: Color32 = Color32::WHITE;
+    pub const ERROR: Color32 = Color32::from_rgb(255, 80, 80);
 }
 
 pub fn get_stmt_color(stmt: &Statement) -> egui::Color32 {
