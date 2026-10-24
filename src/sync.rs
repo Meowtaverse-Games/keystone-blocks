@@ -160,6 +160,17 @@ mod tests {
     }
 
     #[test]
+    fn oversized_uint_literal_is_a_syntax_error() {
+        let mut state = VplState::default();
+        state.load_code(0, "move 99999999999");
+
+        assert!(matches!(
+            state.sync_status(),
+            CodeSyncStatus::SyntaxError(_)
+        ));
+    }
+
+    #[test]
     fn loading_code_does_not_rewrite_it() {
         let mut state = VplState::default();
         let mut code = "move   forward\n\n\nturn left".to_string();

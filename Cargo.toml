@@ -6,4 +6,4 @@ edition = "2024"
 [dependencies]
 bevy = "0.19.1"
 bevy_egui = "0.42.0"
-keystone-lang = { git="https://github.com/Meowtaverse-Games/keystone-lang.git", rev="fc8e3f44f52ed47301a16ab1f109eed077f558a9" }
+keystone-lang = { git="https://github.com/Meowtaverse-Games/keystone-lang.git", rev="07c12ed84c770a0717bf2714ee32f3cffd7babf0" }
