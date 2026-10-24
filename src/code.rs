@@ -4,6 +4,36 @@ pub trait ToCode {
     fn to_code(&self) -> String;
 }
 
+const PREC_UNARY: u8 = 3;
+const PREC_ATOM: u8 = 7;
+
+fn op_precedence(op: &Op) -> u8 {
+    match op {
+        Op::Or => 1,
+        Op::And => 2,
+        Op::Eq | Op::Neq | Op::Lt | Op::Gt | Op::Le | Op::Ge => 4,
+        Op::Add | Op::Sub => 5,
+        Op::Mul | Op::Div => 6,
+    }
+}
+
+fn precedence(expr: &Expr) -> u8 {
+    match expr {
+        Expr::Binary { op, .. } => op_precedence(op),
+        Expr::Unary { .. } => PREC_UNARY,
+        _ => PREC_ATOM,
+    }
+}
+
+fn to_code_with_prec(expr: &Expr, min_prec: u8) -> String {
+    let code = expr.to_code();
+    if precedence(expr) < min_prec {
+        format!("({})", code)
+    } else {
+        code
+    }
+}
+
 impl ToCode for Expr {
     fn to_code(&self) -> String {
         match self {
@@ -36,14 +66,20 @@ impl ToCode for Expr {
                     Op::And => "and",
                     Op::Or => "or",
                 };
-                format!("{} {} {}", lhs.to_code(), op_str, rhs.to_code())
+                let prec = op_precedence(op);
+                format!(
+                    "{} {} {}",
+                    to_code_with_prec(lhs, prec),
+                    op_str,
+                    to_code_with_prec(rhs, prec + 1)
+                )
             }
 
             Expr::Unary { op, exp } => {
                 let op_str = match op {
                     UnaryOp::Not => "not",
                 };
-                format!("{} {}", op_str, exp.to_code())
+                format!("{} {}", op_str, to_code_with_prec(exp, PREC_UNARY))
             }
 
             Expr::Call { callee, args } => {
@@ -99,4 +135,149 @@ pub fn statements_to_string(statements: &[Statement], indent_level: usize) -> St
         }
     }
     code
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use keystone_lang::parse;
+
+    fn bin(op: Op, lhs: Expr, rhs: Expr) -> Expr {
+        Expr::Binary {
+            op,
+            lhs: Box::new(lhs),
+            rhs: Box::new(rhs),
+        }
+    }
+
+    fn not(exp: Expr) -> Expr {
+        Expr::Unary {
+            op: UnaryOp::Not,
+            exp: Box::new(exp),
+        }
+    }
+
+    fn var(name: &str) -> Expr {
+        Expr::Var(name.to_string())
+    }
+
+    fn assert_round_trip(expr: Expr, expected: &str) {
+        let code = expr.to_code();
+        assert_eq!(code, expected);
+        let stmts = parse(&format!("print {code}")).unwrap();
+        assert_eq!(stmts, vec![Statement::Print(expr)], "code: {code}");
+    }
+
+    #[test]
+    fn lower_precedence_operand_is_parenthesized() {
+        assert_round_trip(
+            bin(
+                Op::Mul,
+                bin(Op::Add, var("x"), Expr::Uint(1)),
+                Expr::Uint(2),
+            ),
+            "(x + 1) * 2",
+        );
+        assert_round_trip(
+            bin(
+                Op::Mul,
+                Expr::Uint(2),
+                bin(Op::Add, var("x"), Expr::Uint(1)),
+            ),
+            "2 * (x + 1)",
+        );
+        assert_round_trip(
+            bin(Op::And, bin(Op::Or, var("a"), var("b")), var("c")),
+            "(a or b) and c",
+        );
+    }
+
+    #[test]
+    fn higher_precedence_operand_is_not_parenthesized() {
+        assert_round_trip(
+            bin(
+                Op::Add,
+                var("x"),
+                bin(Op::Mul, Expr::Uint(1), Expr::Uint(2)),
+            ),
+            "x + 1 * 2",
+        );
+        assert_round_trip(
+            bin(
+                Op::Or,
+                bin(Op::And, not(var("a")), var("b")),
+                bin(Op::Lt, var("x"), Expr::Uint(3)),
+            ),
+            "not a and b or x < 3",
+        );
+    }
+
+    #[test]
+    fn left_associativity_is_preserved() {
+        assert_round_trip(
+            bin(
+                Op::Sub,
+                bin(Op::Sub, var("x"), Expr::Uint(1)),
+                Expr::Uint(2),
+            ),
+            "x - 1 - 2",
+        );
+        assert_round_trip(
+            bin(
+                Op::Sub,
+                var("x"),
+                bin(Op::Sub, Expr::Uint(1), Expr::Uint(2)),
+            ),
+            "x - (1 - 2)",
+        );
+        assert_round_trip(
+            bin(
+                Op::Div,
+                var("x"),
+                bin(Op::Mul, Expr::Uint(2), Expr::Uint(3)),
+            ),
+            "x / (2 * 3)",
+        );
+        assert_round_trip(
+            bin(Op::Eq, var("a"), bin(Op::Eq, var("b"), var("c"))),
+            "a == (b == c)",
+        );
+    }
+
+    #[test]
+    fn not_operand_and_not_as_operand() {
+        assert_round_trip(not(bin(Op::And, var("a"), var("b"))), "not (a and b)");
+        assert_round_trip(not(bin(Op::Eq, var("x"), Expr::Uint(1))), "not x == 1");
+        assert_round_trip(not(not(var("a"))), "not not a");
+        assert_round_trip(bin(Op::Eq, not(var("a")), var("b")), "(not a) == b");
+        assert_round_trip(bin(Op::Eq, var("b"), not(var("a"))), "b == (not a)");
+    }
+
+    #[test]
+    fn call_arguments_are_not_parenthesized() {
+        assert_round_trip(
+            bin(
+                Op::Mul,
+                Expr::Call {
+                    callee: keystone_lang::Callee::Rand,
+                    args: vec![
+                        Box::new(bin(Op::Add, var("x"), Expr::Uint(1))),
+                        Box::new(Expr::Uint(10)),
+                    ],
+                },
+                Expr::Uint(2),
+            ),
+            "rand(x + 1, 10) * 2",
+        );
+    }
+
+    #[test]
+    fn text_parentheses_survive_reload() {
+        let stmts = parse("x = (x + 1) * 2\nif not (a or b)\n  move forward\nend").unwrap();
+        let code = statements_to_string(&stmts, 0);
+        assert_eq!(
+            code,
+            "x = (x + 1) * 2\nif not (a or b)\n  move forward\nend\n"
+        );
+    }
 }
