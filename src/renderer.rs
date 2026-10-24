@@ -632,6 +632,10 @@ pub fn expr_slot(
     });
 }
 
+fn uint_from_drag(val: i64) -> u32 {
+    u32::try_from(val.clamp(0, i64::from(u32::MAX))).expect("clamped value fits in u32")
+}
+
 fn expr_contents(ui: &mut egui::Ui, expr: &mut Expr, slot_id: egui::Id, type_ctx: &TypeContext) {
     match expr {
         Expr::Var(name) => {
@@ -640,9 +644,16 @@ fn expr_contents(ui: &mut egui::Ui, expr: &mut Expr, slot_id: egui::Id, type_ctx
         }
 
         Expr::Uint(v) => {
-            let mut val = *v as i64;
-            if ui.add(egui::DragValue::new(&mut val).speed(1)).changed() {
-                *v = val.max(0) as u32;
+            let mut val = i64::from(*v);
+            if ui
+                .add(
+                    egui::DragValue::new(&mut val)
+                        .speed(1)
+                        .range(0..=i64::from(u32::MAX)),
+                )
+                .changed()
+            {
+                *v = uint_from_drag(val);
             }
         }
 
@@ -729,6 +740,27 @@ fn expr_contents(ui: &mut egui::Ui, expr: &mut Expr, slot_id: egui::Id, type_ctx
             }
 
             white_label(ui, ")");
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::uint_from_drag;
+
+    #[test]
+    fn uint_from_drag_clamps_to_u32_range() {
+        for (input, expected) in [
+            (i64::MIN, 0),
+            (-1, 0),
+            (0, 0),
+            (1, 1),
+            (42, 42),
+            (4_294_967_295, u32::MAX),
+            (4_294_967_296, u32::MAX),
+            (i64::MAX, u32::MAX),
+        ] {
+            assert_eq!(uint_from_drag(input), expected, "input: {input}");
         }
     }
 }
