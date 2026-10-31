@@ -402,14 +402,14 @@ fn render_statement_header(
 
     match stmt {
         Statement::Print(expr) => {
-            expr_slot(ui, expr, block_id.with("print_expr"), None, type_ctx);
+            expr_slot(ui, expr, block_id.with("print_expr"), &[], type_ctx);
         }
         Statement::Sleep(expr) => {
             expr_slot(
                 ui,
                 expr,
                 block_id.with("sleep_expr"),
-                Some(Type::Float),
+                &[Type::Float, Type::Uint],
                 type_ctx,
             );
             white_label(ui, "sec");
@@ -419,7 +419,7 @@ fn render_statement_header(
                 ui,
                 expr,
                 block_id.with("move_expr"),
-                Some(Type::Direction),
+                &[Type::Direction],
                 type_ctx,
             );
         }
@@ -428,7 +428,7 @@ fn render_statement_header(
                 ui,
                 expr,
                 block_id.with("turn_expr"),
-                Some(Type::Direction),
+                &[Type::Direction],
                 type_ctx,
             );
         }
@@ -437,7 +437,7 @@ fn render_statement_header(
                 ui,
                 expr,
                 block_id.with("dig_expr"),
-                Some(Type::Direction),
+                &[Type::Direction],
                 type_ctx,
             );
         }
@@ -446,7 +446,7 @@ fn render_statement_header(
                 ui,
                 expr,
                 block_id.with("place_expr"),
-                Some(Type::Direction),
+                &[Type::Direction],
                 type_ctx,
             );
         }
@@ -459,20 +459,20 @@ fn render_statement_header(
                 ui,
                 egui::RichText::new("=").color(colors::TEXT_WHITE).strong(),
             );
-            expr_slot(ui, expr, block_id.with("let_expr"), None, type_ctx);
+            expr_slot(ui, expr, block_id.with("let_expr"), &[], type_ctx);
         }
         Statement::Send(expr) => {
-            expr_slot(ui, expr, block_id.with("send_expr"), None, type_ctx);
+            expr_slot(ui, expr, block_id.with("send_expr"), &[], type_ctx);
         }
         Statement::Receive(expr) => {
-            expr_slot(ui, expr, block_id.with("receive_expr"), None, type_ctx);
+            expr_slot(ui, expr, block_id.with("receive_expr"), &[], type_ctx);
         }
         Statement::If(cond, _) => {
             expr_slot(
                 ui,
                 cond,
                 block_id.with("if_cond"),
-                Some(Type::Boolean),
+                &[Type::Boolean],
                 type_ctx,
             );
         }
@@ -481,7 +481,7 @@ fn render_statement_header(
                 ui,
                 expr,
                 block_id.with("loop_count"),
-                Some(Type::Uint),
+                &[Type::Uint],
                 type_ctx,
             );
             white_label(ui, "times");
@@ -491,7 +491,7 @@ fn render_statement_header(
                 ui,
                 cond,
                 block_id.with("while_cond"),
-                Some(Type::Boolean),
+                &[Type::Boolean],
                 type_ctx,
             );
         }
@@ -604,7 +604,7 @@ pub fn expr_slot(
     ui: &mut egui::Ui,
     expr: &mut Expr,
     slot_id: egui::Id,
-    expected_type: Option<Type>,
+    expected_types: &[Type],
     type_ctx: &TypeContext,
 ) {
     if !egui::DragAndDrop::has_payload_of_type::<DraggedExpr>(ui.ctx()) {
@@ -625,7 +625,7 @@ pub fn expr_slot(
         });
 
         if let Some(payload) = dropped_payload
-            && is_type_compatible(expected_type, &payload.0, type_ctx)
+            && is_type_compatible(expected_types, &payload.0, type_ctx)
         {
             *expr = payload.0.clone();
         }
@@ -676,23 +676,17 @@ fn expr_contents(ui: &mut egui::Ui, expr: &mut Expr, slot_id: egui::Id, type_ctx
         }
 
         Expr::Binary { op, lhs, rhs } => {
-            let child_expected_type = match op {
-                Op::Add | Op::Sub | Op::Mul | Op::Div => Some(Type::Uint),
-                Op::Eq | Op::Neq | Op::Lt | Op::Gt | Op::Le | Op::Ge => Some(Type::Uint),
-                Op::And | Op::Or => Some(Type::Boolean),
+            let child_expected_types: &[Type] = match op {
+                Op::Add | Op::Sub | Op::Mul | Op::Div => &[Type::Uint],
+                Op::Eq | Op::Neq | Op::Lt | Op::Gt | Op::Le | Op::Ge => &[Type::Uint],
+                Op::And | Op::Or => &[Type::Boolean],
             };
 
-            expr_slot(
-                ui,
-                lhs,
-                slot_id.with("lhs"),
-                child_expected_type.clone(),
-                type_ctx,
-            );
+            expr_slot(ui, lhs, slot_id.with("lhs"), child_expected_types, type_ctx);
 
             binary_combobox(ui, op, &slot_id.with("Op").value().to_string());
 
-            expr_slot(ui, rhs, slot_id.with("rhs"), child_expected_type, type_ctx);
+            expr_slot(ui, rhs, slot_id.with("rhs"), child_expected_types, type_ctx);
         }
 
         Expr::Unary { op, exp } => {
@@ -700,13 +694,7 @@ fn expr_contents(ui: &mut egui::Ui, expr: &mut Expr, slot_id: egui::Id, type_ctx
                 UnaryOp::Not => "not",
             };
             white_label(ui, label_text);
-            expr_slot(
-                ui,
-                exp,
-                slot_id.with("inner"),
-                Some(Type::Boolean),
-                type_ctx,
-            );
+            expr_slot(ui, exp, slot_id.with("inner"), &[Type::Boolean], type_ctx);
         }
 
         Expr::Call { callee, args } => {
@@ -719,10 +707,10 @@ fn expr_contents(ui: &mut egui::Ui, expr: &mut Expr, slot_id: egui::Id, type_ctx
             white_label(ui, name);
             white_label(ui, "(");
 
-            let arg_expected_type = match callee {
-                Callee::IsTouched => None,
-                Callee::IsEmpty => Some(Type::Direction),
-                Callee::Rand => Some(Type::Uint),
+            let arg_expected_types: &[Type] = match callee {
+                Callee::IsTouched => &[],
+                Callee::IsEmpty => &[Type::Direction],
+                Callee::Rand => &[Type::Uint],
             };
 
             for (idx, arg) in args.iter_mut().enumerate() {
@@ -730,13 +718,7 @@ fn expr_contents(ui: &mut egui::Ui, expr: &mut Expr, slot_id: egui::Id, type_ctx
                     white_label(ui, ", ");
                 }
 
-                expr_slot(
-                    ui,
-                    arg,
-                    slot_id.with(idx),
-                    arg_expected_type.clone(),
-                    type_ctx,
-                );
+                expr_slot(ui, arg, slot_id.with(idx), arg_expected_types, type_ctx);
             }
 
             white_label(ui, ")");

@@ -216,24 +216,29 @@ pub fn infer_expr_type(expr: &Expr, ctx: &TypeContext) -> InferResult {
     }
 }
 
-pub fn is_type_compatible(expected: Option<Type>, incoming: &Expr, ctx: &TypeContext) -> bool {
-    let expected_type = match expected {
-        Some(t) => t,
-        None => return true,
-    };
+pub fn is_type_compatible(expected: &[Type], incoming: &Expr, ctx: &TypeContext) -> bool {
+    if expected.is_empty() {
+        return true;
+    }
 
-    let infer = infer_expr_type(incoming, ctx);
-
-    let is_compat = match &infer {
-        InferResult::Type(t) => *t == expected_type,
+    match infer_expr_type(incoming, ctx) {
+        InferResult::Type(t) => expected.contains(&t),
         InferResult::Unknown => true,
         InferResult::Invalid => false,
-    };
+    }
+}
 
-    // println!(
-    //     "Expected: {:?}, Infer: {:?}, Result: {}",
-    //     expected_type, infer, is_compat
-    // );
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    is_compat
+    #[test]
+    fn sleep_slot_accepts_float_and_uint() {
+        let ctx = TypeContext::new();
+        let sleep = [Type::Float, Type::Uint];
+        assert!(is_type_compatible(&sleep, &Expr::Float(0.5), &ctx));
+        assert!(is_type_compatible(&sleep, &Expr::Uint(2), &ctx));
+        assert!(!is_type_compatible(&sleep, &Expr::Boolean(true), &ctx));
+        assert!(is_type_compatible(&[], &Expr::Boolean(true), &ctx));
+    }
 }
