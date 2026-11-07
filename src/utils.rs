@@ -70,6 +70,8 @@ fn stmt_command(stmt: &Statement) -> Option<&'static str> {
         Statement::Sleep(_) => Some("sleep"),
         Statement::Dig(_) => Some("dig"),
         Statement::Place(_) => Some("place"),
+        Statement::Send(_) => Some("send"),
+        Statement::Receive(_) => Some("receive"),
         _ => None,
     }
 }

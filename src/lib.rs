@@ -638,7 +638,16 @@ mod tests {
     #[test]
     fn unrestricted_palette_shows_everything() {
         let code = palette_code(None);
-        for word in ["move", "sleep", "dig", "place", "is_touched", "is_empty"] {
+        for word in [
+            "move",
+            "sleep",
+            "dig",
+            "place",
+            "is_touched",
+            "is_empty",
+            "send",
+            "receive",
+        ] {
             assert!(uses(&code, word), "{word} is missing");
         }
     }
@@ -647,7 +656,7 @@ mod tests {
     fn palette_hides_commands_the_stone_cannot_use() {
         let code = palette_code(Some(&allowed(&["move", "sleep"])));
         assert!(uses(&code, "move") && uses(&code, "sleep"));
-        for word in ["dig", "place", "is_touched", "is_empty"] {
+        for word in ["dig", "place", "is_touched", "is_empty", "send", "receive"] {
             assert!(!uses(&code, word), "{word} should be hidden");
         }
         for word in ["turn", "print", "if true", "loop", "while", "rand("] {
@@ -656,6 +665,8 @@ mod tests {
         let code = palette_code(Some(&allowed(&["move", "is_touched", "is_empty", "place"])));
         assert!(uses(&code, "place") && uses(&code, "if is_touched()"));
         assert!(!uses(&code, "dig") && !uses(&code, "sleep"));
+        let code = palette_code(Some(&allowed(&["move", "send", "receive"])));
+        assert!(uses(&code, "send") && uses(&code, "receive"));
     }
 
     #[test]
