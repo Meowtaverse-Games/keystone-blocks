@@ -1,13 +1,13 @@
-use crate::code::{expr_value_problem, var_name_problem};
+use crate::code::{CodeLanguage, expr_value_problem, var_name_problem};
 use crate::utils::{ELSE_BRANCH, disallowed_in_stmt, get_stmt_info};
 use crate::{colorizer::*, utils::is_type_compatible};
 use bevy_egui::egui;
 use std::collections::HashSet;
 
-use keystone_lang::{Callee, Direction, Expr, Op, Statement, Type, TypeContext, UnaryOp};
+use keystone_lang::{Callee, Direction, Expr, Op, Statement, Type, UnaryOp};
 
 use crate::{
-    structs::{DraggedBlock, DraggedExpr, DropTarget},
+    structs::{BlockContext, DraggedBlock, DraggedExpr, DropTarget},
     utils::is_ancestor,
 };
 
@@ -152,7 +152,7 @@ fn statement_block(
     stmt: &mut Statement,
     block_id: egui::Id,
     payload: DraggedBlock,
-    type_ctx: &TypeContext,
+    cx: &BlockContext,
     mut body: impl FnMut(&mut egui::Ui, &mut Vec<Statement>, Branch),
 ) -> (egui::Response, egui::Rect) {
     let color = get_stmt_color(stmt);
@@ -164,7 +164,7 @@ fn statement_block(
                     let header_rect = ui
                         .horizontal(|ui| {
                             ui.set_min_height(ui.spacing().interact_size.y + 6.0);
-                            render_statement_header(ui, stmt, block_id, type_ctx);
+                            render_statement_header(ui, stmt, block_id, cx);
                         })
                         .response
                         .rect;
@@ -204,12 +204,12 @@ pub fn palette_block(
     stmt: &mut Statement,
     block_id: egui::Id,
     target_blocks: &mut Vec<Statement>,
-    type_ctx: &TypeContext,
+    cx: &BlockContext,
 ) -> f32 {
     apply_block_spacing(ui);
     let payload = DraggedBlock::NewStatement(stmt.clone());
 
-    let (response, _) = statement_block(ui, stmt, block_id, payload, type_ctx, |ui, _, _| {
+    let (response, _) = statement_block(ui, stmt, block_id, payload, cx, |ui, _, _| {
         ui.allocate_space(egui::vec2(40.0, 8.0));
     });
 
@@ -226,7 +226,7 @@ pub fn palette_expr_block(
     caption: Option<&str>,
     expr: &mut Expr,
     block_id: egui::Id,
-    type_ctx: &TypeContext,
+    cx: &BlockContext,
 ) -> f32 {
     apply_block_spacing(ui);
     let payload = DraggedExpr(expr.clone());
@@ -243,7 +243,7 @@ pub fn palette_expr_block(
                             .strong(),
                     );
                 }
-                expr_contents(ui, expr, block_id, type_ctx);
+                expr_contents(ui, expr, block_id, cx);
             });
         });
     });
@@ -298,7 +298,7 @@ pub fn block_list(
     current_blocks: &mut [Statement],
     current_path: Vec<usize>,
     drop_target: &mut Option<DropTarget>,
-    type_ctx: &TypeContext,
+    cx: &BlockContext,
     allowed: Option<&HashSet<String>>,
 ) {
     ui.spacing_mut().item_spacing.y = 0.0;
@@ -325,13 +325,13 @@ pub fn block_list(
             DraggedBlock::MoveStatement {
                 path: this_path.clone(),
             },
-            type_ctx,
+            cx,
             |ui, children, branch| {
                 let mut list_path = this_path.clone();
                 if branch == Branch::Else {
                     list_path.push(ELSE_BRANCH);
                 }
-                block_list(ui, children, list_path, drop_target, type_ctx, allowed);
+                block_list(ui, children, list_path, drop_target, cx, allowed);
             },
         );
         let rect = response.rect;
@@ -411,7 +411,7 @@ fn render_statement_header(
     ui: &mut egui::Ui,
     stmt: &mut Statement,
     block_id: egui::Id,
-    type_ctx: &TypeContext,
+    cx: &BlockContext,
 ) {
     let (icon, name) = get_stmt_info(stmt);
     unselectable_label(
@@ -423,7 +423,7 @@ fn render_statement_header(
 
     match stmt {
         Statement::Print(expr) => {
-            expr_slot(ui, expr, block_id.with("print_expr"), &[], type_ctx);
+            expr_slot(ui, expr, block_id.with("print_expr"), &[], cx);
         }
         Statement::Sleep(expr) => {
             expr_slot(
@@ -431,36 +431,18 @@ fn render_statement_header(
                 expr,
                 block_id.with("sleep_expr"),
                 &[Type::Float, Type::Uint],
-                type_ctx,
+                cx,
             );
             white_label(ui, "sec");
         }
         Statement::Move(expr) => {
-            expr_slot(
-                ui,
-                expr,
-                block_id.with("move_expr"),
-                &[Type::Direction],
-                type_ctx,
-            );
+            expr_slot(ui, expr, block_id.with("move_expr"), &[Type::Direction], cx);
         }
         Statement::Turn(expr) => {
-            expr_slot(
-                ui,
-                expr,
-                block_id.with("turn_expr"),
-                &[Type::Direction],
-                type_ctx,
-            );
+            expr_slot(ui, expr, block_id.with("turn_expr"), &[Type::Direction], cx);
         }
         Statement::Dig(expr) => {
-            expr_slot(
-                ui,
-                expr,
-                block_id.with("dig_expr"),
-                &[Type::Direction],
-                type_ctx,
-            );
+            expr_slot(ui, expr, block_id.with("dig_expr"), &[Type::Direction], cx);
         }
         Statement::Place(expr) => {
             expr_slot(
@@ -468,53 +450,35 @@ fn render_statement_header(
                 expr,
                 block_id.with("place_expr"),
                 &[Type::Direction],
-                type_ctx,
+                cx,
             );
         }
         Statement::Let(name, expr) => {
             get_slot_frame().show(ui, |ui| {
                 let response = fitted_text_edit(ui, name);
-                mark_problem(ui, response, var_name_problem(name));
+                mark_problem(ui, response, var_name_problem(name, cx.language));
             });
             unselectable_label(
                 ui,
                 egui::RichText::new("=").color(colors::TEXT_WHITE).strong(),
             );
-            expr_slot(ui, expr, block_id.with("let_expr"), &[], type_ctx);
+            expr_slot(ui, expr, block_id.with("let_expr"), &[], cx);
         }
         Statement::Send(expr) => {
-            expr_slot(ui, expr, block_id.with("send_expr"), &[], type_ctx);
+            expr_slot(ui, expr, block_id.with("send_expr"), &[], cx);
         }
         Statement::Receive(expr) => {
-            expr_slot(ui, expr, block_id.with("receive_expr"), &[], type_ctx);
+            expr_slot(ui, expr, block_id.with("receive_expr"), &[], cx);
         }
         Statement::If(cond, _, _) => {
-            expr_slot(
-                ui,
-                cond,
-                block_id.with("if_cond"),
-                &[Type::Boolean],
-                type_ctx,
-            );
+            expr_slot(ui, cond, block_id.with("if_cond"), &[Type::Boolean], cx);
         }
         Statement::Loop(expr, _) => {
-            expr_slot(
-                ui,
-                expr,
-                block_id.with("loop_count"),
-                &[Type::Uint],
-                type_ctx,
-            );
+            expr_slot(ui, expr, block_id.with("loop_count"), &[Type::Uint], cx);
             white_label(ui, "times");
         }
         Statement::While(cond, _) => {
-            expr_slot(
-                ui,
-                cond,
-                block_id.with("while_cond"),
-                &[Type::Boolean],
-                type_ctx,
-            );
+            expr_slot(ui, cond, block_id.with("while_cond"), &[Type::Boolean], cx);
         }
     }
 }
@@ -564,7 +528,28 @@ fn render_bottom_drop_zone(
     }
 }
 
-pub fn direction_combobox(ui: &mut egui::Ui, dir: &mut Direction, id_salt: &str) {
+pub fn direction_combobox(
+    ui: &mut egui::Ui,
+    dir: &mut Direction,
+    id_salt: &str,
+    language: CodeLanguage,
+) {
+    let choices: &[(Direction, &str)] = match language {
+        CodeLanguage::Keystone => &[
+            (Direction::Forward, "Forward"),
+            (Direction::Back, "Back"),
+            (Direction::Left, "Left"),
+            (Direction::Right, "Right"),
+            (Direction::Up, "Up"),
+            (Direction::Down, "Down"),
+        ],
+        CodeLanguage::Rhai => &[
+            (Direction::Left, "Left"),
+            (Direction::Right, "Right"),
+            (Direction::Up, "Up"),
+            (Direction::Down, "Down"),
+        ],
+    };
     ui.scope(|ui| {
         ui.visuals_mut().widgets.hovered.bg_stroke = egui::Stroke::NONE;
         ui.visuals_mut().widgets.active.bg_stroke = egui::Stroke::NONE;
@@ -572,12 +557,9 @@ pub fn direction_combobox(ui: &mut egui::Ui, dir: &mut Direction, id_salt: &str)
         egui::ComboBox::from_id_salt(id_salt)
             .selected_text(format!("{:?}", dir))
             .show_ui(ui, |ui| {
-                ui.selectable_value(dir, Direction::Forward, "Forward");
-                ui.selectable_value(dir, Direction::Back, "Back");
-                ui.selectable_value(dir, Direction::Left, "Left");
-                ui.selectable_value(dir, Direction::Right, "Right");
-                ui.selectable_value(dir, Direction::Up, "Up");
-                ui.selectable_value(dir, Direction::Down, "Down");
+                for (choice, label) in choices {
+                    ui.selectable_value(dir, choice.clone(), *label);
+                }
             });
     });
 }
@@ -626,11 +608,11 @@ pub fn expr_slot(
     expr: &mut Expr,
     slot_id: egui::Id,
     expected_types: &[Type],
-    type_ctx: &TypeContext,
+    cx: &BlockContext,
 ) {
     if !egui::DragAndDrop::has_payload_of_type::<DraggedExpr>(ui.ctx()) {
         get_slot_frame().show(ui, |ui| {
-            ui.horizontal(|ui| expr_contents(ui, expr, slot_id, type_ctx));
+            ui.horizontal(|ui| expr_contents(ui, expr, slot_id, cx));
         });
         return;
     }
@@ -642,11 +624,11 @@ pub fn expr_slot(
         ui.visuals_mut().widgets.active.bg_stroke = egui::Stroke::new(2.0, DROP_MARKER_FILL);
 
         let (_, dropped_payload) = ui.dnd_drop_zone::<DraggedExpr, _>(get_slot_frame(), |ui| {
-            ui.horizontal(|ui| expr_contents(ui, expr, slot_id, type_ctx));
+            ui.horizontal(|ui| expr_contents(ui, expr, slot_id, cx));
         });
 
         if let Some(payload) = dropped_payload
-            && is_type_compatible(expected_types, &payload.0, type_ctx)
+            && is_type_compatible(expected_types, &payload.0, &cx.type_ctx)
         {
             *expr = payload.0.clone();
         }
@@ -657,11 +639,11 @@ fn uint_from_drag(val: i64) -> u32 {
     u32::try_from(val.clamp(0, i64::from(u32::MAX))).expect("clamped value fits in u32")
 }
 
-fn expr_contents(ui: &mut egui::Ui, expr: &mut Expr, slot_id: egui::Id, type_ctx: &TypeContext) {
+fn expr_contents(ui: &mut egui::Ui, expr: &mut Expr, slot_id: egui::Id, cx: &BlockContext) {
     match expr {
         Expr::Var(name) => {
             let response = fitted_text_edit(ui, name);
-            mark_problem(ui, response, expr_value_problem(expr));
+            mark_problem(ui, response, expr_value_problem(expr, cx.language));
         }
 
         Expr::Uint(v) => {
@@ -680,12 +662,12 @@ fn expr_contents(ui: &mut egui::Ui, expr: &mut Expr, slot_id: egui::Id, type_ctx
 
         Expr::Float(v) => {
             let response = ui.add(egui::DragValue::new(v).speed(0.1).range(0.0..=f64::MAX));
-            mark_problem(ui, response, expr_value_problem(expr));
+            mark_problem(ui, response, expr_value_problem(expr, cx.language));
         }
 
         Expr::String(s) => {
             let response = fitted_text_edit(ui, s);
-            mark_problem(ui, response, expr_value_problem(expr));
+            mark_problem(ui, response, expr_value_problem(expr, cx.language));
         }
 
         Expr::Boolean(b) => {
@@ -693,7 +675,12 @@ fn expr_contents(ui: &mut egui::Ui, expr: &mut Expr, slot_id: egui::Id, type_ctx
         }
 
         Expr::Direction(dir) => {
-            direction_combobox(ui, dir, &slot_id.with("dir").value().to_string());
+            direction_combobox(
+                ui,
+                dir,
+                &slot_id.with("dir").value().to_string(),
+                cx.language,
+            );
         }
 
         Expr::Binary { op, lhs, rhs } => {
@@ -703,11 +690,11 @@ fn expr_contents(ui: &mut egui::Ui, expr: &mut Expr, slot_id: egui::Id, type_ctx
                 Op::And | Op::Or => &[Type::Boolean],
             };
 
-            expr_slot(ui, lhs, slot_id.with("lhs"), child_expected_types, type_ctx);
+            expr_slot(ui, lhs, slot_id.with("lhs"), child_expected_types, cx);
 
             binary_combobox(ui, op, &slot_id.with("Op").value().to_string());
 
-            expr_slot(ui, rhs, slot_id.with("rhs"), child_expected_types, type_ctx);
+            expr_slot(ui, rhs, slot_id.with("rhs"), child_expected_types, cx);
         }
 
         Expr::Unary { op, exp } => {
@@ -715,7 +702,7 @@ fn expr_contents(ui: &mut egui::Ui, expr: &mut Expr, slot_id: egui::Id, type_ctx
                 UnaryOp::Not => "not",
             };
             white_label(ui, label_text);
-            expr_slot(ui, exp, slot_id.with("inner"), &[Type::Boolean], type_ctx);
+            expr_slot(ui, exp, slot_id.with("inner"), &[Type::Boolean], cx);
         }
 
         Expr::Call { callee, args } => {
@@ -739,7 +726,7 @@ fn expr_contents(ui: &mut egui::Ui, expr: &mut Expr, slot_id: egui::Id, type_ctx
                     white_label(ui, ", ");
                 }
 
-                expr_slot(ui, arg, slot_id.with(idx), arg_expected_types, type_ctx);
+                expr_slot(ui, arg, slot_id.with(idx), arg_expected_types, cx);
             }
 
             white_label(ui, ")");
