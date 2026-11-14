@@ -281,7 +281,8 @@ fn default_palette(allowed: Option<&HashSet<String>>) -> Vec<PaletteEntry> {
         Stmt(Statement::Send(Expr::String("signal".to_string()))),
         Stmt(Statement::Receive(Expr::String("signal".to_string()))),
         Section("Nest Blocks"),
-        Stmt(Statement::If(if_cond, Vec::new())),
+        Stmt(Statement::If(if_cond.clone(), Vec::new(), None)),
+        Stmt(Statement::If(if_cond, Vec::new(), Some(Vec::new()))),
         Stmt(Statement::Loop(Expr::Uint(3), Vec::new())),
         Stmt(Statement::While(Expr::Boolean(true), Vec::new())),
         Section("Value Blocks (Expr)"),
@@ -597,7 +598,7 @@ fn handle_move_request(blocks: &mut Vec<Statement>, req: MoveRequest) {
                     let target_idx = target_path[i];
 
                     if i == src_depth - 1 {
-                        if src_idx < target_idx {
+                        if src_idx < target_idx && target_idx != ELSE_BRANCH {
                             target_path[i] -= 1;
                         }
                         break;
@@ -633,6 +634,167 @@ mod tests {
 
     fn uses(code: &[String], word: &str) -> bool {
         code.iter().any(|c| c.contains(word))
+    }
+
+    fn mv(direction: Direction) -> Statement {
+        Statement::Move(Expr::Direction(direction))
+    }
+
+    fn if_else_program() -> Vec<Statement> {
+        vec![Statement::If(
+            Expr::Boolean(true),
+            vec![mv(Direction::Left), mv(Direction::Right)],
+            Some(vec![mv(Direction::Up)]),
+        )]
+    }
+
+    fn branches(blocks: &[Statement]) -> (&[Statement], &[Statement]) {
+        let Statement::If(_, then_body, Some(else_body)) = &blocks[0] else {
+            panic!("expected an if-else block, got {blocks:?}");
+        };
+        (then_body, else_body)
+    }
+
+    #[test]
+    fn palette_offers_if_with_and_without_else() {
+        let palette = default_palette(None);
+        let ifs: Vec<_> = palette
+            .iter()
+            .filter_map(|entry| match entry {
+                PaletteEntry::Stmt(Statement::If(_, _, else_body)) => Some(else_body.is_some()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(ifs, [false, true]);
+    }
+
+    #[test]
+    fn blocks_can_be_inserted_into_and_removed_from_the_else_branch() {
+        let mut blocks = if_else_program();
+        insert_statement_at_path(&mut blocks, &[0, ELSE_BRANCH], 0, mv(Direction::Down));
+        assert_eq!(
+            branches(&blocks).1,
+            [mv(Direction::Down), mv(Direction::Up)]
+        );
+
+        assert_eq!(
+            remove_statement_at_path(&mut blocks, &[0, ELSE_BRANCH, 1]),
+            Some(mv(Direction::Up))
+        );
+        assert_eq!(branches(&blocks).1, [mv(Direction::Down)]);
+        assert_eq!(
+            branches(&blocks).0.len(),
+            2,
+            "then-branch must be untouched"
+        );
+    }
+
+    #[test]
+    fn else_path_on_a_block_without_else_does_nothing() {
+        let mut blocks = vec![Statement::Loop(Expr::Uint(1), vec![mv(Direction::Left)])];
+        let before = blocks.clone();
+        insert_statement_at_path(&mut blocks, &[0, ELSE_BRANCH], 0, mv(Direction::Down));
+        assert_eq!(
+            remove_statement_at_path(&mut blocks, &[0, ELSE_BRANCH, 0]),
+            None
+        );
+        assert_eq!(blocks, before);
+    }
+
+    #[test]
+    fn moving_from_then_to_else_keeps_the_else_branch_path() {
+        let mut blocks = if_else_program();
+        handle_move_request(
+            &mut blocks,
+            MoveRequest {
+                src_path: vec![0, 0],
+                target_path: vec![0, ELSE_BRANCH],
+                insert_idx: 1,
+            },
+        );
+        let (then_body, else_body) = branches(&blocks);
+        assert_eq!(then_body, [mv(Direction::Right)]);
+        assert_eq!(else_body, [mv(Direction::Up), mv(Direction::Left)]);
+    }
+
+    #[test]
+    fn moving_from_else_to_then_and_within_else() {
+        let mut blocks = if_else_program();
+        handle_move_request(
+            &mut blocks,
+            MoveRequest {
+                src_path: vec![0, ELSE_BRANCH, 0],
+                target_path: vec![0],
+                insert_idx: 1,
+            },
+        );
+        let (then_body, else_body) = branches(&blocks);
+        assert_eq!(
+            then_body,
+            [mv(Direction::Left), mv(Direction::Up), mv(Direction::Right)]
+        );
+        assert!(else_body.is_empty());
+
+        let mut blocks = vec![Statement::If(
+            Expr::Boolean(true),
+            vec![],
+            Some(vec![
+                mv(Direction::Left),
+                mv(Direction::Right),
+                mv(Direction::Up),
+            ]),
+        )];
+        handle_move_request(
+            &mut blocks,
+            MoveRequest {
+                src_path: vec![0, ELSE_BRANCH, 0],
+                target_path: vec![0, ELSE_BRANCH],
+                insert_idx: 3,
+            },
+        );
+        assert_eq!(
+            branches(&blocks).1,
+            [mv(Direction::Right), mv(Direction::Up), mv(Direction::Left)]
+        );
+    }
+
+    #[test]
+    fn moving_a_top_level_block_before_an_if_keeps_its_else_reachable() {
+        let mut blocks = vec![mv(Direction::Down)];
+        blocks.extend(if_else_program());
+        handle_move_request(
+            &mut blocks,
+            MoveRequest {
+                src_path: vec![0],
+                target_path: vec![1, ELSE_BRANCH],
+                insert_idx: 0,
+            },
+        );
+        assert_eq!(
+            branches(&blocks).1,
+            [mv(Direction::Down), mv(Direction::Up)]
+        );
+    }
+
+    #[test]
+    fn an_if_cannot_be_dropped_into_its_own_else_branch() {
+        assert!(is_ancestor(&[0], &[0, ELSE_BRANCH]));
+        assert!(is_ancestor(&[0], &[0, ELSE_BRANCH, 1]));
+        assert!(!is_ancestor(&[0, ELSE_BRANCH, 0], &[0]));
+    }
+
+    #[test]
+    fn disallowed_commands_in_else_branches_are_reported() {
+        let only_move = allowed(&["move"]);
+        let program = keystone_lang::parse(
+            "if true\n  move left\nelse if is_touched()\n  move up\nelse\n  dig down\nend",
+        )
+        .unwrap();
+        assert_eq!(
+            disallowed_in_program(&program, Some(&only_move)),
+            ["dig", "is_touched"]
+        );
+        assert!(!is_stmt_allowed(&program[0], Some(&only_move)));
     }
 
     #[test]

@@ -1,5 +1,5 @@
 use crate::code::{expr_value_problem, var_name_problem};
-use crate::utils::{disallowed_in_stmt, get_stmt_info};
+use crate::utils::{ELSE_BRANCH, disallowed_in_stmt, get_stmt_info};
 use crate::{colorizer::*, utils::is_type_compatible};
 use bevy_egui::egui;
 use std::collections::HashSet;
@@ -101,11 +101,17 @@ pub fn apply_block_spacing(ui: &mut egui::Ui) {
     ui.spacing_mut().combo_width = 0.0;
 }
 
-fn stmt_body_mut(stmt: &mut Statement) -> Option<&mut Vec<Statement>> {
-    match stmt {
-        Statement::If(_, body) | Statement::Loop(_, body) | Statement::While(_, body) => Some(body),
-        _ => None,
-    }
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Branch {
+    Then,
+    Else,
+}
+
+fn has_body(stmt: &Statement) -> bool {
+    matches!(
+        stmt,
+        Statement::If(..) | Statement::Loop(..) | Statement::While(..)
+    )
 }
 
 fn draggable_block<P: std::any::Any + Send + Sync, R>(
@@ -147,7 +153,7 @@ fn statement_block(
     block_id: egui::Id,
     payload: DraggedBlock,
     type_ctx: &TypeContext,
-    body: impl FnOnce(&mut egui::Ui, &mut Vec<Statement>),
+    mut body: impl FnMut(&mut egui::Ui, &mut Vec<Statement>, Branch),
 ) -> (egui::Response, egui::Rect) {
     let color = get_stmt_color(stmt);
 
@@ -163,8 +169,26 @@ fn statement_block(
                         .response
                         .rect;
 
-                    if let Some(children) = stmt_body_mut(stmt) {
-                        get_mouth_frame().show(ui, |ui| body(ui, children));
+                    match stmt {
+                        Statement::If(_, then_body, else_body) => {
+                            get_mouth_frame().show(ui, |ui| body(ui, then_body, Branch::Then));
+                            if let Some(else_body) = else_body {
+                                ui.horizontal(|ui| {
+                                    ui.set_min_height(ui.spacing().interact_size.y);
+                                    unselectable_label(
+                                        ui,
+                                        egui::RichText::new("Else")
+                                            .color(colors::TEXT_WHITE)
+                                            .strong(),
+                                    );
+                                });
+                                get_mouth_frame().show(ui, |ui| body(ui, else_body, Branch::Else));
+                            }
+                        }
+                        Statement::Loop(_, children) | Statement::While(_, children) => {
+                            get_mouth_frame().show(ui, |ui| body(ui, children, Branch::Then));
+                        }
+                        _ => {}
                     }
                     header_rect
                 })
@@ -185,7 +209,7 @@ pub fn palette_block(
     apply_block_spacing(ui);
     let payload = DraggedBlock::NewStatement(stmt.clone());
 
-    let (response, _) = statement_block(ui, stmt, block_id, payload, type_ctx, |ui, _| {
+    let (response, _) = statement_block(ui, stmt, block_id, payload, type_ctx, |ui, _, _| {
         ui.allocate_space(egui::vec2(40.0, 8.0));
     });
 
@@ -292,7 +316,7 @@ pub fn block_list(
             .collect::<Vec<_>>()
             .join("_");
         let block_id = egui::Id::new(&current_id_str);
-        let has_body = stmt_body_mut(stmt).is_some();
+        let has_body = has_body(stmt);
 
         let (response, header_rect) = statement_block(
             ui,
@@ -302,15 +326,12 @@ pub fn block_list(
                 path: this_path.clone(),
             },
             type_ctx,
-            |ui, children| {
-                block_list(
-                    ui,
-                    children,
-                    this_path.clone(),
-                    drop_target,
-                    type_ctx,
-                    allowed,
-                );
+            |ui, children, branch| {
+                let mut list_path = this_path.clone();
+                if branch == Branch::Else {
+                    list_path.push(ELSE_BRANCH);
+                }
+                block_list(ui, children, list_path, drop_target, type_ctx, allowed);
             },
         );
         let rect = response.rect;
@@ -467,7 +488,7 @@ fn render_statement_header(
         Statement::Receive(expr) => {
             expr_slot(ui, expr, block_id.with("receive_expr"), &[], type_ctx);
         }
-        Statement::If(cond, _) => {
+        Statement::If(cond, _, _) => {
             expr_slot(
                 ui,
                 cond,

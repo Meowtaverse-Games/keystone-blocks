@@ -116,6 +116,7 @@ mod tests {
                     Expr::Uint(3),
                     vec![Statement::Move(Expr::Direction(Direction::Back))],
                 )],
+                None,
             ),
             Statement::While(
                 Expr::Binary {
@@ -148,8 +149,73 @@ mod tests {
                         rhs: Box::new(Expr::Uint(1)),
                     },
                 )],
+                None,
             ),
         ]
+    }
+
+    fn print(text: &str) -> Statement {
+        Statement::Print(Expr::String(text.to_string()))
+    }
+
+    fn if_else(then_body: Vec<Statement>, else_body: Option<Vec<Statement>>) -> Statement {
+        Statement::If(Expr::Boolean(true), then_body, else_body)
+    }
+
+    #[test]
+    fn else_branches_round_trip_through_code() {
+        let nested_loop = Statement::Loop(Expr::Uint(2), vec![if_else(vec![], Some(vec![]))]);
+        for blocks in [
+            vec![if_else(vec![print("a")], Some(vec![print("b")]))],
+            vec![if_else(vec![], Some(vec![]))],
+            vec![if_else(
+                vec![print("a")],
+                Some(vec![if_else(
+                    vec![print("b")],
+                    Some(vec![if_else(vec![print("c")], Some(vec![print("d")]))]),
+                )]),
+            )],
+            vec![if_else(
+                vec![print("a")],
+                Some(vec![if_else(vec![print("b")], None)]),
+            )],
+            // An `if` that shares the else-branch with other blocks is not an `else if`.
+            vec![if_else(
+                vec![],
+                Some(vec![if_else(vec![print("b")], None), print("c")]),
+            )],
+            vec![nested_loop],
+        ] {
+            let code = statements_to_string(&blocks, 0);
+            assert_eq!(parse(&code).unwrap(), blocks, "generated code:\n{code}");
+        }
+    }
+
+    #[test]
+    fn a_lone_if_in_the_else_branch_is_written_as_else_if() {
+        let blocks = vec![if_else(
+            vec![print("a")],
+            Some(vec![if_else(vec![print("b")], Some(vec![print("c")]))]),
+        )];
+
+        assert_eq!(
+            statements_to_string(&blocks, 0),
+            "if true\n  print \"a\"\nelse if true\n  print \"b\"\nelse\n  print \"c\"\nend\n"
+        );
+    }
+
+    #[test]
+    fn editing_an_else_branch_writes_code_back() {
+        let mut state = VplState::default();
+        let mut code = "if true\n  move left\nelse\nend\n".to_string();
+        state.load_code(0, &code);
+        let Statement::If(_, _, Some(else_body)) = &mut state.blocks[0] else {
+            panic!("expected an if-else block, got {:?}", state.blocks);
+        };
+        else_body.push(Statement::Move(Expr::Direction(Direction::Right)));
+
+        assert!(state.write_back(&mut code));
+        assert_eq!(code, "if true\n  move left\nelse\n  move right\nend\n");
     }
 
     #[test]
