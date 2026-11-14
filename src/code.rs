@@ -153,9 +153,21 @@ pub fn statements_to_string(statements: &[Statement], indent_level: usize) -> St
                 code.push_str(&statements_to_string(body, indent_level + 1));
                 code.push_str(&format!("{}end\n", indent));
             }
-            Statement::If(cond, body) => {
+            Statement::If(cond, body, else_body) => {
                 code.push_str(&format!("{}if {}\n", indent, cond.to_code()));
                 code.push_str(&statements_to_string(body, indent_level + 1));
+                let mut else_body = else_body.as_deref();
+                while let Some(branch) = else_body {
+                    if let [Statement::If(cond, body, next)] = branch {
+                        code.push_str(&format!("{}else if {}\n", indent, cond.to_code()));
+                        code.push_str(&statements_to_string(body, indent_level + 1));
+                        else_body = next.as_deref();
+                    } else {
+                        code.push_str(&format!("{}else\n", indent));
+                        code.push_str(&statements_to_string(branch, indent_level + 1));
+                        break;
+                    }
+                }
                 code.push_str(&format!("{}end\n", indent));
             }
         }

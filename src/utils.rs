@@ -4,6 +4,22 @@ use keystone_lang::{Callee, Expr, Op, Statement, Type, TypeContext, expr_check};
 
 use crate::structs::InferResult;
 
+pub const ELSE_BRANCH: usize = usize::MAX;
+
+fn child_list_mut<'a, 'p>(
+    stmt: &'a mut Statement,
+    rest: &'p [usize],
+) -> Option<(&'a mut Vec<Statement>, &'p [usize])> {
+    match (stmt, rest.first()) {
+        (Statement::If(_, _, Some(else_body)), Some(&ELSE_BRANCH)) => Some((else_body, &rest[1..])),
+        (_, Some(&ELSE_BRANCH)) => None,
+        (Statement::If(_, body, _) | Statement::Loop(_, body) | Statement::While(_, body), _) => {
+            Some((body, rest))
+        }
+        _ => None,
+    }
+}
+
 pub fn remove_statement_at_path(blocks: &mut Vec<Statement>, path: &[usize]) -> Option<Statement> {
     if path.is_empty() {
         return None;
@@ -20,14 +36,8 @@ pub fn remove_statement_at_path(blocks: &mut Vec<Statement>, path: &[usize]) -> 
         return None;
     }
 
-    let body = match &mut blocks[head] {
-        Statement::If(_, body) => body,
-        Statement::Loop(_, body) => body,
-        Statement::While(_, body) => body,
-        _ => return None,
-    };
-
-    remove_statement_at_path(body, &path[1..])
+    let (body, rest) = child_list_mut(&mut blocks[head], &path[1..])?;
+    remove_statement_at_path(body, rest)
 }
 
 pub fn insert_statement_at_path(
@@ -47,14 +57,10 @@ pub fn insert_statement_at_path(
         return;
     }
 
-    let body = match &mut blocks[head] {
-        Statement::If(_, body) => body,
-        Statement::Loop(_, body) => body,
-        Statement::While(_, body) => body,
-        _ => return,
+    let Some((body, rest)) = child_list_mut(&mut blocks[head], &target_path[1..]) else {
+        return;
     };
-
-    insert_statement_at_path(body, &target_path[1..], insert_idx, stmt);
+    insert_statement_at_path(body, rest, insert_idx, stmt);
 }
 
 pub fn is_ancestor(ancestor_path: &[usize], target_path: &[usize]) -> bool {
@@ -110,7 +116,7 @@ pub fn disallowed_in_stmt(
         let expr = match stmt {
             Statement::Loop(e, _)
             | Statement::While(e, _)
-            | Statement::If(e, _)
+            | Statement::If(e, _, _)
             | Statement::Print(e)
             | Statement::Move(e)
             | Statement::Turn(e)
@@ -135,9 +141,15 @@ pub fn disallowed_in_program(
     let mut found = Vec::new();
     for stmt in stmts {
         found.extend(disallowed_in_stmt(stmt, allowed));
-        if let Statement::Loop(_, body) | Statement::While(_, body) | Statement::If(_, body) = stmt
-        {
-            found.extend(disallowed_in_program(body, allowed));
+        match stmt {
+            Statement::Loop(_, body) | Statement::While(_, body) | Statement::If(_, body, None) => {
+                found.extend(disallowed_in_program(body, allowed));
+            }
+            Statement::If(_, body, Some(else_body)) => {
+                found.extend(disallowed_in_program(body, allowed));
+                found.extend(disallowed_in_program(else_body, allowed));
+            }
+            _ => {}
         }
     }
     found.sort_unstable();
@@ -181,7 +193,7 @@ pub fn get_stmt_info(stmt: &Statement) -> (&'static str, &'static str) {
         Statement::Let(_, _) => ("📝", "Let"),
         Statement::Send(_) => ("📡", "Send"),
         Statement::Receive(_) => ("📥", "Receive"),
-        Statement::If(_, _) => ("❓", "If"),
+        Statement::If(_, _, _) => ("❓", "If"),
         Statement::Loop(_, _) => ("🔁", "Loop"),
         Statement::While(_, _) => ("🔄", "While"),
     }
