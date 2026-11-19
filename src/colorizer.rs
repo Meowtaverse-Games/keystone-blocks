@@ -24,7 +24,7 @@ pub fn get_stmt_color(stmt: &Statement) -> egui::Color32 {
         }
         Statement::Print(_) => colors::LOOKS,
         Statement::Sleep(_)
-        | Statement::If(_, _)
+        | Statement::If(_, _, _)
         | Statement::Loop(_, _)
         | Statement::While(_, _) => colors::CONTROL,
         Statement::Let(_, _) => colors::VARIABLES,
