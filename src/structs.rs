@@ -4,6 +4,7 @@ use bevy::prelude::*;
 use bevy_egui::egui;
 use keystone_lang::{Expr, Statement, Type, TypeContext};
 
+use crate::code::CodeLanguage;
 use crate::sync::CodeSync;
 
 #[derive(Clone, Debug)]
@@ -36,7 +37,13 @@ pub struct VplState {
     pub generated_code: String,
     pub is_visible: bool,
     pub allowed_commands: Option<HashSet<String>>,
+    pub language: CodeLanguage,
     pub(crate) sync: CodeSync,
+}
+
+pub(crate) struct BlockContext {
+    pub type_ctx: TypeContext,
+    pub language: CodeLanguage,
 }
 
 impl Default for VplState {
@@ -47,6 +54,7 @@ impl Default for VplState {
             generated_code: String::new(),
             is_visible: false,
             allowed_commands: None,
+            language: CodeLanguage::default(),
             sync: CodeSync::default(),
         }
     }

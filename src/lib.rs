@@ -1,6 +1,7 @@
 mod code;
 mod colorizer;
 mod renderer;
+mod rhai;
 
 mod structs;
 mod sync;
@@ -10,6 +11,7 @@ use std::collections::HashSet;
 use bevy::prelude::*;
 use bevy_egui::egui::{self, Color32};
 use code::*;
+pub use code::{CodeInspection, CodeLanguage, inspect_code};
 use colorizer::colors;
 use keystone_lang::{Callee, Direction, Expr, Op, Statement, TypeContext, UnaryOp};
 use renderer as render;
@@ -27,24 +29,22 @@ impl Plugin for VisualProgrammingPlugin {
 
 pub fn show_vpl_contents(ui: &mut egui::Ui, state: &mut VplState) {
     state.type_ctx = TypeContext::new();
-    let type_ctx = state.type_ctx.clone();
+    let cx = BlockContext {
+        type_ctx: state.type_ctx.clone(),
+        language: state.language,
+    };
 
     let rect = ui.available_rect_before_wrap().intersect(ui.clip_rect());
     let available = rect.size();
 
     if available.x < available.y {
-        show_stacked(ui, rect, state, &type_ctx);
+        show_stacked(ui, rect, state, &cx);
     } else {
-        show_side_by_side(ui, rect, state, &type_ctx);
+        show_side_by_side(ui, rect, state, &cx);
     }
 }
 
-fn show_side_by_side(
-    ui: &mut egui::Ui,
-    rect: egui::Rect,
-    state: &mut VplState,
-    type_ctx: &TypeContext,
-) {
+fn show_side_by_side(ui: &mut egui::Ui, rect: egui::Rect, state: &mut VplState, cx: &BlockContext) {
     let available = rect.size();
     let width_id = ui.make_persistent_id("vpl_palette_width");
     let measured = ui.data(|d| d.get_temp::<f32>(width_id));
@@ -67,7 +67,7 @@ fn show_side_by_side(
                             ui,
                             &mut state.blocks,
                             state.allowed_commands.as_ref(),
-                            type_ctx,
+                            cx,
                             false,
                         )
                     },
@@ -78,18 +78,13 @@ fn show_side_by_side(
             ui.separator();
 
             ui.vertical(|ui| {
-                render_program_panel(
-                    ui,
-                    &mut state.blocks,
-                    state.allowed_commands.as_ref(),
-                    type_ctx,
-                );
+                render_program_panel(ui, &mut state.blocks, state.allowed_commands.as_ref(), cx);
             });
         },
     );
 }
 
-fn show_stacked(ui: &mut egui::Ui, rect: egui::Rect, state: &mut VplState, type_ctx: &TypeContext) {
+fn show_stacked(ui: &mut egui::Ui, rect: egui::Rect, state: &mut VplState, cx: &BlockContext) {
     let ratio_id = ui.make_persistent_id("vpl_stacked_palette_ratio");
     let ratio = ui
         .data(|d| d.get_temp::<f32>(ratio_id))
@@ -113,7 +108,7 @@ fn show_stacked(ui: &mut egui::Ui, rect: egui::Rect, state: &mut VplState, type_
                         ui,
                         &mut state.blocks,
                         state.allowed_commands.as_ref(),
-                        type_ctx,
+                        cx,
                         true,
                     );
                 },
@@ -125,12 +120,7 @@ fn show_stacked(ui: &mut egui::Ui, rect: egui::Rect, state: &mut VplState, type_
                 ui.data_mut(|d| d.insert_temp(ratio_id, new_height / rect.height()));
             }
 
-            render_program_panel(
-                ui,
-                &mut state.blocks,
-                state.allowed_commands.as_ref(),
-                type_ctx,
-            );
+            render_program_panel(ui, &mut state.blocks, state.allowed_commands.as_ref(), cx);
         },
     );
 }
@@ -165,7 +155,9 @@ pub fn show_vpl_for_code(
     source_id: usize,
     code: &mut String,
     allowed_commands: Option<&HashSet<String>>,
+    language: CodeLanguage,
 ) -> bool {
+    state.language = language;
     if state.allowed_commands.as_ref() != allowed_commands {
         state.allowed_commands = allowed_commands.cloned();
     }
@@ -237,7 +229,7 @@ fn show_syntax_error(ui: &mut egui::Ui, message: &str) {
 const PALETTE_EXTRA_WIDTH: f32 = 16.0;
 
 pub fn generate_code_from_state(state: &VplState) -> String {
-    statements_to_string(&state.blocks, 0)
+    generate_code(&state.blocks, state.language)
 }
 
 // pub fn generate(state: ) {
@@ -256,7 +248,7 @@ enum PaletteEntry {
     Value(Option<&'static str>, Expr),
 }
 
-fn default_palette(allowed: Option<&HashSet<String>>) -> Vec<PaletteEntry> {
+fn default_palette(allowed: Option<&HashSet<String>>, language: CodeLanguage) -> Vec<PaletteEntry> {
     use PaletteEntry::*;
 
     let touched = Expr::Call {
@@ -281,7 +273,8 @@ fn default_palette(allowed: Option<&HashSet<String>>) -> Vec<PaletteEntry> {
         Stmt(Statement::Send(Expr::String("signal".to_string()))),
         Stmt(Statement::Receive(Expr::String("signal".to_string()))),
         Section("Nest Blocks"),
-        Stmt(Statement::If(if_cond, Vec::new())),
+        Stmt(Statement::If(if_cond.clone(), Vec::new(), None)),
+        Stmt(Statement::If(if_cond, Vec::new(), Some(Vec::new()))),
         Stmt(Statement::Loop(Expr::Uint(3), Vec::new())),
         Stmt(Statement::While(Expr::Boolean(true), Vec::new())),
         Section("Value Blocks (Expr)"),
@@ -363,12 +356,49 @@ fn default_palette(allowed: Option<&HashSet<String>>) -> Vec<PaletteEntry> {
         ),
     ];
 
-    let entries = entries.into_iter().filter(|entry| match entry {
-        Stmt(stmt) => is_stmt_allowed(stmt, allowed),
-        Value(_, expr) => is_expr_allowed(expr, allowed),
-        Section(_) | SubSection(_) => true,
-    });
+    let entries = entries
+        .into_iter()
+        .filter(|entry| language != CodeLanguage::Rhai || in_rhai(entry))
+        .map(|entry| match (language, entry) {
+            (
+                CodeLanguage::Rhai,
+                Value(
+                    caption,
+                    Expr::Call {
+                        callee: Callee::IsEmpty,
+                        ..
+                    },
+                ),
+            ) => Value(
+                caption,
+                Expr::Call {
+                    callee: Callee::IsEmpty,
+                    args: vec![Box::new(Expr::Direction(Direction::Right))],
+                },
+            ),
+            (_, entry) => entry,
+        })
+        .filter(|entry| match entry {
+            Stmt(stmt) => is_stmt_allowed(stmt, allowed),
+            Value(_, expr) => is_expr_allowed(expr, allowed),
+            Section(_) | SubSection(_) => true,
+        });
     drop_empty_headings(entries.collect())
+}
+
+fn in_rhai(entry: &PaletteEntry) -> bool {
+    !matches!(
+        entry,
+        PaletteEntry::Stmt(Statement::Turn(_))
+            | PaletteEntry::Value(_, Expr::Direction(_))
+            | PaletteEntry::Value(
+                _,
+                Expr::Call {
+                    callee: Callee::Rand,
+                    ..
+                }
+            )
+    )
 }
 
 fn drop_empty_headings(entries: Vec<PaletteEntry>) -> Vec<PaletteEntry> {
@@ -401,17 +431,17 @@ fn render_palette_panel(
     ui: &mut egui::Ui,
     blocks: &mut Vec<Statement>,
     allowed: Option<&HashSet<String>>,
-    type_ctx: &TypeContext,
+    cx: &BlockContext,
     wrapped: bool,
 ) -> f32 {
     let mut allowed_key = allowed.map(|set| set.iter().cloned().collect::<Vec<_>>());
     if let Some(key) = &mut allowed_key {
         key.sort();
     }
-    let entries_id = ui.make_persistent_id(("vpl_palette_entries", allowed_key));
+    let entries_id = ui.make_persistent_id(("vpl_palette_entries", allowed_key, cx.language));
     let mut entries = ui
         .data(|d| d.get_temp::<Vec<PaletteEntry>>(entries_id))
-        .unwrap_or_else(|| default_palette(allowed));
+        .unwrap_or_else(|| default_palette(allowed, cx.language));
 
     let item_width = ui
         .scope(|ui| {
@@ -472,7 +502,7 @@ fn render_palette_panel(
                                                     entry,
                                                     entries_id.with(entry_idx),
                                                     blocks,
-                                                    type_ctx,
+                                                    cx,
                                                 );
                                                 ui.data_mut(|d| d.insert_temp(width_id, width));
                                                 item_width = item_width.max(width);
@@ -518,12 +548,12 @@ fn render_palette_entry(
     entry: &mut PaletteEntry,
     block_id: egui::Id,
     blocks: &mut Vec<Statement>,
-    type_ctx: &TypeContext,
+    cx: &BlockContext,
 ) -> f32 {
     match entry {
-        PaletteEntry::Stmt(stmt) => render::palette_block(ui, stmt, block_id, blocks, type_ctx),
+        PaletteEntry::Stmt(stmt) => render::palette_block(ui, stmt, block_id, blocks, cx),
         PaletteEntry::Value(caption, expr) => {
-            render::palette_expr_block(ui, *caption, expr, block_id, type_ctx)
+            render::palette_expr_block(ui, *caption, expr, block_id, cx)
         }
         PaletteEntry::Section(_) | PaletteEntry::SubSection(_) => 0.0,
     }
@@ -538,14 +568,14 @@ fn render_program_panel(
     ui: &mut egui::Ui,
     blocks: &mut Vec<Statement>,
     allowed: Option<&HashSet<String>>,
-    type_ctx: &TypeContext,
+    cx: &BlockContext,
 ) {
     egui::ScrollArea::both()
         .id_salt("right_program_scroll")
         .show(ui, |ui| {
             let mut drop_target = None;
 
-            render::block_list(ui, blocks, Vec::new(), &mut drop_target, type_ctx, allowed);
+            render::block_list(ui, blocks, Vec::new(), &mut drop_target, cx, allowed);
 
             if let Some(target) = drop_target
                 && let Some(marker) = target.marker
@@ -597,7 +627,7 @@ fn handle_move_request(blocks: &mut Vec<Statement>, req: MoveRequest) {
                     let target_idx = target_path[i];
 
                     if i == src_depth - 1 {
-                        if src_idx < target_idx {
+                        if src_idx < target_idx && target_idx != ELSE_BRANCH {
                             target_path[i] -= 1;
                         }
                         break;
@@ -621,7 +651,7 @@ mod tests {
     }
 
     fn palette_code(allowed: Option<&HashSet<String>>) -> Vec<String> {
-        default_palette(allowed)
+        default_palette(allowed, CodeLanguage::Keystone)
             .into_iter()
             .filter_map(|entry| match entry {
                 PaletteEntry::Stmt(stmt) => Some(statements_to_string(&[stmt], 0)),
@@ -635,10 +665,244 @@ mod tests {
         code.iter().any(|c| c.contains(word))
     }
 
+    fn mv(direction: Direction) -> Statement {
+        Statement::Move(Expr::Direction(direction))
+    }
+
+    fn if_else_program() -> Vec<Statement> {
+        vec![Statement::If(
+            Expr::Boolean(true),
+            vec![mv(Direction::Left), mv(Direction::Right)],
+            Some(vec![mv(Direction::Up)]),
+        )]
+    }
+
+    fn branches(blocks: &[Statement]) -> (&[Statement], &[Statement]) {
+        let Statement::If(_, then_body, Some(else_body)) = &blocks[0] else {
+            panic!("expected an if-else block, got {blocks:?}");
+        };
+        (then_body, else_body)
+    }
+
+    #[test]
+    fn rhai_palette_offers_only_what_the_game_rhai_can_run() {
+        let palette = default_palette(None, CodeLanguage::Rhai);
+        let has = |pred: &dyn Fn(&PaletteEntry) -> bool| palette.iter().any(pred);
+        assert!(!has(&|e| matches!(
+            e,
+            PaletteEntry::Stmt(Statement::Turn(_))
+        )));
+        assert!(!has(&|e| matches!(
+            e,
+            PaletteEntry::Value(_, Expr::Direction(_))
+        )));
+        assert!(!has(&|e| matches!(
+            e,
+            PaletteEntry::Value(
+                _,
+                Expr::Call {
+                    callee: Callee::Rand,
+                    ..
+                }
+            )
+        )));
+        assert!(has(&|e| matches!(
+            e,
+            PaletteEntry::Stmt(Statement::Move(_))
+        )));
+
+        for entry in &palette {
+            let stmt = match entry {
+                PaletteEntry::Stmt(stmt) => stmt.clone(),
+                PaletteEntry::Value(_, expr) => Statement::Print(expr.clone()),
+                PaletteEntry::Section(_) | PaletteEntry::SubSection(_) => continue,
+            };
+            let mut blocks = vec![Statement::Let("x".to_string(), Expr::Uint(0))];
+            blocks.push(stmt);
+            let code = generate_code(&blocks, CodeLanguage::Rhai);
+            assert_eq!(
+                parse_code(&code, CodeLanguage::Rhai).map(|p| p.statements),
+                Ok(blocks),
+                "palette entry can't be written as Rhai:\n{code}"
+            );
+        }
+    }
+
+    #[test]
+    fn keystone_palette_is_unchanged_by_rhai_support() {
+        let palette = default_palette(None, CodeLanguage::Keystone);
+        assert!(
+            palette
+                .iter()
+                .any(|e| matches!(e, PaletteEntry::Stmt(Statement::Turn(_))))
+        );
+        assert!(palette.iter().any(|e| matches!(
+            e,
+            PaletteEntry::Value(
+                _,
+                Expr::Call {
+                    callee: Callee::Rand,
+                    ..
+                }
+            )
+        )));
+    }
+
+    #[test]
+    fn palette_offers_if_with_and_without_else() {
+        let palette = default_palette(None, CodeLanguage::Keystone);
+        let ifs: Vec<_> = palette
+            .iter()
+            .filter_map(|entry| match entry {
+                PaletteEntry::Stmt(Statement::If(_, _, else_body)) => Some(else_body.is_some()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(ifs, [false, true]);
+    }
+
+    #[test]
+    fn blocks_can_be_inserted_into_and_removed_from_the_else_branch() {
+        let mut blocks = if_else_program();
+        insert_statement_at_path(&mut blocks, &[0, ELSE_BRANCH], 0, mv(Direction::Down));
+        assert_eq!(
+            branches(&blocks).1,
+            [mv(Direction::Down), mv(Direction::Up)]
+        );
+
+        assert_eq!(
+            remove_statement_at_path(&mut blocks, &[0, ELSE_BRANCH, 1]),
+            Some(mv(Direction::Up))
+        );
+        assert_eq!(branches(&blocks).1, [mv(Direction::Down)]);
+        assert_eq!(
+            branches(&blocks).0.len(),
+            2,
+            "then-branch must be untouched"
+        );
+    }
+
+    #[test]
+    fn else_path_on_a_block_without_else_does_nothing() {
+        let mut blocks = vec![Statement::Loop(Expr::Uint(1), vec![mv(Direction::Left)])];
+        let before = blocks.clone();
+        insert_statement_at_path(&mut blocks, &[0, ELSE_BRANCH], 0, mv(Direction::Down));
+        assert_eq!(
+            remove_statement_at_path(&mut blocks, &[0, ELSE_BRANCH, 0]),
+            None
+        );
+        assert_eq!(blocks, before);
+    }
+
+    #[test]
+    fn moving_from_then_to_else_keeps_the_else_branch_path() {
+        let mut blocks = if_else_program();
+        handle_move_request(
+            &mut blocks,
+            MoveRequest {
+                src_path: vec![0, 0],
+                target_path: vec![0, ELSE_BRANCH],
+                insert_idx: 1,
+            },
+        );
+        let (then_body, else_body) = branches(&blocks);
+        assert_eq!(then_body, [mv(Direction::Right)]);
+        assert_eq!(else_body, [mv(Direction::Up), mv(Direction::Left)]);
+    }
+
+    #[test]
+    fn moving_from_else_to_then_and_within_else() {
+        let mut blocks = if_else_program();
+        handle_move_request(
+            &mut blocks,
+            MoveRequest {
+                src_path: vec![0, ELSE_BRANCH, 0],
+                target_path: vec![0],
+                insert_idx: 1,
+            },
+        );
+        let (then_body, else_body) = branches(&blocks);
+        assert_eq!(
+            then_body,
+            [mv(Direction::Left), mv(Direction::Up), mv(Direction::Right)]
+        );
+        assert!(else_body.is_empty());
+
+        let mut blocks = vec![Statement::If(
+            Expr::Boolean(true),
+            vec![],
+            Some(vec![
+                mv(Direction::Left),
+                mv(Direction::Right),
+                mv(Direction::Up),
+            ]),
+        )];
+        handle_move_request(
+            &mut blocks,
+            MoveRequest {
+                src_path: vec![0, ELSE_BRANCH, 0],
+                target_path: vec![0, ELSE_BRANCH],
+                insert_idx: 3,
+            },
+        );
+        assert_eq!(
+            branches(&blocks).1,
+            [mv(Direction::Right), mv(Direction::Up), mv(Direction::Left)]
+        );
+    }
+
+    #[test]
+    fn moving_a_top_level_block_before_an_if_keeps_its_else_reachable() {
+        let mut blocks = vec![mv(Direction::Down)];
+        blocks.extend(if_else_program());
+        handle_move_request(
+            &mut blocks,
+            MoveRequest {
+                src_path: vec![0],
+                target_path: vec![1, ELSE_BRANCH],
+                insert_idx: 0,
+            },
+        );
+        assert_eq!(
+            branches(&blocks).1,
+            [mv(Direction::Down), mv(Direction::Up)]
+        );
+    }
+
+    #[test]
+    fn an_if_cannot_be_dropped_into_its_own_else_branch() {
+        assert!(is_ancestor(&[0], &[0, ELSE_BRANCH]));
+        assert!(is_ancestor(&[0], &[0, ELSE_BRANCH, 1]));
+        assert!(!is_ancestor(&[0, ELSE_BRANCH, 0], &[0]));
+    }
+
+    #[test]
+    fn disallowed_commands_in_else_branches_are_reported() {
+        let only_move = allowed(&["move"]);
+        let program = keystone_lang::parse(
+            "if true\n  move left\nelse if is_touched()\n  move up\nelse\n  dig down\nend",
+        )
+        .unwrap();
+        assert_eq!(
+            disallowed_in_program(&program, Some(&only_move)),
+            ["dig", "is_touched"]
+        );
+        assert!(!is_stmt_allowed(&program[0], Some(&only_move)));
+    }
+
     #[test]
     fn unrestricted_palette_shows_everything() {
         let code = palette_code(None);
-        for word in ["move", "sleep", "dig", "place", "is_touched", "is_empty"] {
+        for word in [
+            "move",
+            "sleep",
+            "dig",
+            "place",
+            "is_touched",
+            "is_empty",
+            "send",
+            "receive",
+        ] {
             assert!(uses(&code, word), "{word} is missing");
         }
     }
@@ -647,7 +911,7 @@ mod tests {
     fn palette_hides_commands_the_stone_cannot_use() {
         let code = palette_code(Some(&allowed(&["move", "sleep"])));
         assert!(uses(&code, "move") && uses(&code, "sleep"));
-        for word in ["dig", "place", "is_touched", "is_empty"] {
+        for word in ["dig", "place", "is_touched", "is_empty", "send", "receive"] {
             assert!(!uses(&code, word), "{word} should be hidden");
         }
         for word in ["turn", "print", "if true", "loop", "while", "rand("] {
@@ -656,11 +920,13 @@ mod tests {
         let code = palette_code(Some(&allowed(&["move", "is_touched", "is_empty", "place"])));
         assert!(uses(&code, "place") && uses(&code, "if is_touched()"));
         assert!(!uses(&code, "dig") && !uses(&code, "sleep"));
+        let code = palette_code(Some(&allowed(&["move", "send", "receive"])));
+        assert!(uses(&code, "send") && uses(&code, "receive"));
     }
 
     #[test]
     fn palette_has_no_empty_headings() {
-        let entries = default_palette(Some(&allowed(&[])));
+        let entries = default_palette(Some(&allowed(&[])), CodeLanguage::Keystone);
         for pair in entries.windows(2) {
             let heading_then_heading = matches!(pair[0], PaletteEntry::Section(_))
                 && matches!(pair[1], PaletteEntry::Section(_));
