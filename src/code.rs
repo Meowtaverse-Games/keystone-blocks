@@ -1,4 +1,62 @@
-use keystone_lang::{Direction, Expr, Op, Statement, UnaryOp, parse};
+use keystone_lang::{Direction, Error, Expr, Op, Statement, UnaryOp, parse};
+
+use crate::rhai::{expr_to_rhai, is_rhai_variable_name, parse_rhai, statements_to_rhai};
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum CodeLanguage {
+    #[default]
+    Keystone,
+    Rhai,
+}
+
+pub(crate) struct ParsedCode {
+    pub statements: Vec<Statement>,
+    pub has_comments: bool,
+}
+
+pub(crate) fn parse_code(code: &str, language: CodeLanguage) -> Result<ParsedCode, String> {
+    match language {
+        CodeLanguage::Keystone => parse(code)
+            .map(|statements| ParsedCode {
+                statements,
+                has_comments: false,
+            })
+            .map_err(|err| format_error(&err)),
+        CodeLanguage::Rhai => parse_rhai(code).map(|program| ParsedCode {
+            statements: program.statements,
+            has_comments: program.has_comments,
+        }),
+    }
+}
+
+pub(crate) fn generate_code(statements: &[Statement], language: CodeLanguage) -> String {
+    match language {
+        CodeLanguage::Keystone => statements_to_string(statements, 0),
+        CodeLanguage::Rhai => statements_to_rhai(statements),
+    }
+}
+
+pub(crate) fn format_error(err: &Error) -> String {
+    match err {
+        Error::SyntaxError { messages } => messages.join("\n"),
+        other => format!("{other:?}"),
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum CodeInspection {
+    Representable { has_comments: bool },
+    Unrepresentable(String),
+}
+
+pub fn inspect_code(code: &str, language: CodeLanguage) -> CodeInspection {
+    match parse_code(code, language) {
+        Ok(parsed) => CodeInspection::Representable {
+            has_comments: parsed.has_comments,
+        },
+        Err(message) => CodeInspection::Unrepresentable(message),
+    }
+}
 
 pub trait ToCode {
     fn to_code(&self) -> String;
@@ -99,7 +157,10 @@ impl ToCode for Expr {
     }
 }
 
-pub fn expr_value_problem(expr: &Expr) -> Option<&'static str> {
+pub fn expr_value_problem(expr: &Expr, language: CodeLanguage) -> Option<&'static str> {
+    if language == CodeLanguage::Rhai {
+        return rhai_expr_value_problem(expr);
+    }
     if let Expr::String(s) = expr
         && s.contains('"')
     {
@@ -115,13 +176,34 @@ pub fn expr_value_problem(expr: &Expr) -> Option<&'static str> {
     })
 }
 
-pub fn var_name_problem(name: &str) -> Option<&'static str> {
+fn rhai_expr_value_problem(expr: &Expr) -> Option<&'static str> {
+    match expr {
+        Expr::String(s) if s.contains('"') || s.contains('\\') => {
+            Some("Text can't contain \" or \\.")
+        }
+        Expr::Var(name) => var_name_problem(name, CodeLanguage::Rhai),
+        _ => {
+            let code = format!("print({});", expr_to_rhai(expr));
+            match parse_rhai(&code) {
+                Ok(program) if program.statements == [Statement::Print(expr.clone())] => None,
+                _ => Some("This value can't be written as code."),
+            }
+        }
+    }
+}
+
+pub fn var_name_problem(name: &str, language: CodeLanguage) -> Option<&'static str> {
+    if language == CodeLanguage::Rhai {
+        return (!is_rhai_variable_name(name)).then_some(RHAI_NAME_PROBLEM);
+    }
     let code = format!("{name} = 0");
     match parse(&code) {
         Ok(stmts) if stmts == [Statement::Let(name.to_string(), Expr::Uint(0))] => None,
         _ => Some(NAME_PROBLEM),
     }
 }
+
+const RHAI_NAME_PROBLEM: &str = "Use letters, digits and _ for names (starting with a letter), and avoid Rhai keywords such as let, if or fn.";
 
 const NAME_PROBLEM: &str = "Use letters, digits and _ for names (not starting with a digit), and avoid reserved words such as if, move or forward.";
 
@@ -311,20 +393,32 @@ mod tests {
 
     #[test]
     fn detects_values_that_cannot_be_written() {
-        assert!(expr_value_problem(&Expr::String("hello \"world\"".to_string())).is_some());
-        assert!(expr_value_problem(&Expr::String("hello world".to_string())).is_none());
-        assert!(expr_value_problem(&var("my_x1")).is_none());
-        assert!(expr_value_problem(&var("")).is_some());
-        assert!(expr_value_problem(&var("my x")).is_some());
-        assert!(expr_value_problem(&var("1x")).is_some());
-        assert!(expr_value_problem(&var("forward")).is_some());
-        assert!(expr_value_problem(&var("if")).is_some());
-        assert!(expr_value_problem(&Expr::Float(1.5)).is_none());
-        assert!(expr_value_problem(&Expr::Float(-1.5)).is_some());
+        assert!(
+            expr_value_problem(
+                &Expr::String("hello \"world\"".to_string()),
+                CodeLanguage::Keystone
+            )
+            .is_some()
+        );
+        assert!(
+            expr_value_problem(
+                &Expr::String("hello world".to_string()),
+                CodeLanguage::Keystone
+            )
+            .is_none()
+        );
+        assert!(expr_value_problem(&var("my_x1"), CodeLanguage::Keystone).is_none());
+        assert!(expr_value_problem(&var(""), CodeLanguage::Keystone).is_some());
+        assert!(expr_value_problem(&var("my x"), CodeLanguage::Keystone).is_some());
+        assert!(expr_value_problem(&var("1x"), CodeLanguage::Keystone).is_some());
+        assert!(expr_value_problem(&var("forward"), CodeLanguage::Keystone).is_some());
+        assert!(expr_value_problem(&var("if"), CodeLanguage::Keystone).is_some());
+        assert!(expr_value_problem(&Expr::Float(1.5), CodeLanguage::Keystone).is_none());
+        assert!(expr_value_problem(&Expr::Float(-1.5), CodeLanguage::Keystone).is_some());
 
-        assert!(var_name_problem("x").is_none());
-        assert!(var_name_problem("my x").is_some());
-        assert!(var_name_problem("").is_some());
+        assert!(var_name_problem("x", CodeLanguage::Keystone).is_none());
+        assert!(var_name_problem("my x", CodeLanguage::Keystone).is_some());
+        assert!(var_name_problem("", CodeLanguage::Keystone).is_some());
     }
 
     #[test]
