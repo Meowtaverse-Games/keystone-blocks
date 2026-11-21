@@ -6,7 +6,7 @@ edition = "2024"
 [dependencies]
 bevy = "0.19.1"
 bevy_egui = "0.42.0"
-keystone-lang = { git="https://github.com/Meowtaverse-Games/keystone-lang.git", rev="98736d70b4bb0f10fda6679c7fc181ab9cb2106d" }
+keystone-lang = { git="https://github.com/Meowtaverse-Games/keystone-lang.git", rev="275eaaa63ca88231f7e49ae47fc5bc9e4abbf4ae" }
 
 [dev-dependencies]
 # Same version as keystone-call-of-cats; checks the written Rhai against the real engine.
