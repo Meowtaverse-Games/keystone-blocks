@@ -3562,7 +3562,7 @@ dependencies = [
 [[package]]
 name = "keystone-lang"
 version = "0.1.0"
-source = "git+https://github.com/Meowtaverse-Games/keystone-lang.git?rev=98736d70b4bb0f10fda6679c7fc181ab9cb2106d#98736d70b4bb0f10fda6679c7fc181ab9cb2106d"
+source = "git+https://github.com/Meowtaverse-Games/keystone-lang.git?rev=275eaaa63ca88231f7e49ae47fc5bc9e4abbf4ae#275eaaa63ca88231f7e49ae47fc5bc9e4abbf4ae"
 dependencies = [
  "chumsky",
  "rand",
